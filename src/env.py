@@ -102,7 +102,38 @@ class ClimaxHeroesEnv(gym.Env):
         # Release all gamepad buttons to a neutral state
         self._release_all()
         
-        # Capture first frame
+        # If this is not the first start, handle the menu navigation to rematch!
+        # Initial state HP is set to 300.0, so if either HP is less than 300.0, a round just ended.
+        if self.prev_p1_hp < 300.0 or self.prev_p2_hp < 300.0:
+            print("[Env] Match ended. Starting automated rematch menu selection...")
+            # 1. Dismiss results screens (tap A every 1.5s for 7.5s)
+            for _ in range(5):
+                if self.gamepad is not None:
+                    self.gamepad.press_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_A)
+                    self.gamepad.update()
+                    time.sleep(0.05)
+                    self.gamepad.release_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_A)
+                    self.gamepad.update()
+                time.sleep(1.45)
+                
+            # 2. Select character (we should now be on Character Select screen)
+            # Tap A 6 times to pick P1 -> Form -> P2 -> Form -> Stage -> Start
+            print("[Env] Selecting characters (Kuuga vs Kuuga) and Stage...")
+            for _ in range(6):
+                if self.gamepad is not None:
+                    self.gamepad.press_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_A)
+                    self.gamepad.update()
+                    time.sleep(0.05)
+                    self.gamepad.release_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_A)
+                    self.gamepad.update()
+                time.sleep(0.8)
+                
+            # 3. Wait for loading screen to load the match
+            print("[Env] Waiting for loading screen...")
+            time.sleep(6.0)
+            print("[Env] Rematch loaded! Battle starting.")
+        
+        # Capture first frame of the new round
         raw_img = np.array(self.sct.grab(self.window_region))
         gray = cv2.cvtColor(raw_img, cv2.COLOR_BGRA2GRAY)
         obs_frame = cv2.resize(gray, (84, 84))
