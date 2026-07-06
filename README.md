@@ -107,3 +107,12 @@ Then navigate to `http://localhost:6006` in your browser.
 *   This project is licensed under the **[MIT License](LICENSE)**.
 *   Interested in contributing? Check out our **[Contributing Guidelines](CONTRIBUTING.md)** for coding standards, style guides, and workflow details.
 
+---
+
+## Disclaimer
+
+This project is an independent, open-source research and educational endeavor. It is not affiliated with, authorized, sponsored, or endorsed by Bandai Namco Entertainment, Sony Interactive Entertainment, or any of their partners or subsidiaries. 
+
+All trademarks, game content, character designs, and assets belong to their respective owners. No proprietary game files, ROMs, ISOs, or emulator BIOS files are distributed in this repository.
+
+
