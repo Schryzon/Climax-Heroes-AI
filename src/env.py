@@ -115,12 +115,12 @@ class ClimaxHeroesEnv(gym.Env):
                     self.gamepad.release_button(button=btn)
                     self.gamepad.update()
 
-            # 1. Circle button (Xbox B) - Click Survival mode
+            # 1. Circle button (Xbox B) - Click Survival mode after the losing animation ends
             time.sleep(3.65)
             tap(vg.XUSB_BUTTON.XUSB_GAMEPAD_B)
             
-            # 2. D-pad Up - Choose Kuuga from Decade
-            time.sleep(6.36)
+            # 2. D-pad Up - Choose Kuuga from Decade (extended delay to ensure menu is fully loaded)
+            time.sleep(7.50)
             tap(vg.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_UP)
             
             # 3. Circle button (Xbox B) - Choose Kuuga (P1)
@@ -133,7 +133,7 @@ class ClimaxHeroesEnv(gym.Env):
             
             # 5. Wait for loading screen to load the match
             print("[Env] Waiting for loading screen...")
-            time.sleep(6.0)
+            time.sleep(10.0)
             print("[Env] Rematch loaded! Battle starting.")
         
         # Capture first frame of the new round
@@ -315,13 +315,22 @@ class ClimaxHeroesEnv(gym.Env):
         reward = (damage_dealt * 1.0) - (damage_taken * 1.2)
         
         # 2. Guard Gauge change (shield management: P1 is AI, P2 is Opponent)
+        # Opponent's guard gauge reduction (we want to crush their shield)
         guard_dealt = max(0.0, self.prev_p2_guard - p2_guard)
-        guard_taken = max(0.0, self.prev_p1_guard - p1_guard)
-        reward += (guard_dealt * 0.1) - (guard_taken * 0.15)
+        reward += guard_dealt * 0.1
         
+        # AI's guard gauge reduction (we only penalize if they also took HP damage, i.e. failed block)
+        # If they took no HP damage, it means they blocked successfully, so we reward it!
+        guard_taken = max(0.0, self.prev_p1_guard - p1_guard)
+        if guard_taken > 0:
+            if damage_taken > 0:
+                reward -= guard_taken * 0.15  # Failed block / hit
+            else:
+                reward += guard_taken * 0.20  # Successful block (absorbed hit on shield!)
+                
         # 3. Rider Gauge change (generating special meter is good for AI P1)
         rider_gained = max(0.0, p1_rider - self.prev_p1_rider)
-        reward += rider_gained * 0.05
+        reward += rider_gained * 0.30  # Increased from 0.05 to 0.30 to encourage charging!
         
         # 4. Combo bonus
         if combo_count > 0:
