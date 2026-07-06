@@ -61,7 +61,20 @@ Run the custom environment with random actions to see the real-time parsing dash
 python312 .\tests\test_env.py
 ```
 
----
+### Step 4: Run RL Model Training
+To train the PPO model against the PCSX2 emulated CPU player:
+1. Open PCSX2, go to **Vs Mode**, set **Player 1 = Player** (which our AI drives), and **Player 2 = CPU** (which the game drives).
+2. Start the training script:
+   ```powershell
+   python312 .\src\train.py
+   ```
+
+### Step 5: Monitor Progress via TensorBoard
+You can watch the reward curves and training metrics climb in real-time by launching TensorBoard:
+```powershell
+tensorboard --logdir ./tb_logs/
+```
+Then navigate to `http://localhost:6006` in your browser.
 
 ## State Extraction & Environment Specs
 

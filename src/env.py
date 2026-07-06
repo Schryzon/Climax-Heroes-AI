@@ -275,18 +275,18 @@ class ClimaxHeroesEnv(gym.Env):
         return 0
 
     def _calculate_reward(self, p1_hp, p2_hp, p1_guard, p2_guard, p1_rider, p2_rider, combo_count):
-        # 1. HP damage dealt vs taken
-        damage_dealt = max(0.0, self.prev_p1_hp - p1_hp)
-        damage_taken = max(0.0, self.prev_p2_hp - p2_hp)
+        # 1. HP damage dealt (to P2) vs taken (by P1)
+        damage_dealt = max(0.0, self.prev_p2_hp - p2_hp)
+        damage_taken = max(0.0, self.prev_p1_hp - p1_hp)
         reward = (damage_dealt * 1.0) - (damage_taken * 1.2)
         
-        # 2. Guard Gauge change (shield management)
-        guard_dealt = max(0.0, self.prev_p1_guard - p1_guard)
-        guard_taken = max(0.0, self.prev_p2_guard - p2_guard)
+        # 2. Guard Gauge change (shield management: P1 is AI, P2 is Opponent)
+        guard_dealt = max(0.0, self.prev_p2_guard - p2_guard)
+        guard_taken = max(0.0, self.prev_p1_guard - p1_guard)
         reward += (guard_dealt * 0.1) - (guard_taken * 0.15)
         
-        # 3. Rider Gauge change (generating special meter is good)
-        rider_gained = max(0.0, p2_rider - self.prev_p2_rider)
+        # 3. Rider Gauge change (generating special meter is good for AI P1)
+        rider_gained = max(0.0, p1_rider - self.prev_p1_rider)
         reward += rider_gained * 0.05
         
         # 4. Combo bonus
