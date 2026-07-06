@@ -1,5 +1,18 @@
 # Climax Heroes AI 🎮
 
+<p align="center">
+  <img src="assets/banner.png" alt="Climax Heroes AI Banner" width="80%" />
+</p>
+
+<p align="center">
+  <a href="https://www.python.org/"><img src="https://img.shields.io/badge/Python-3.12-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python" /></a>
+  <a href="https://gymnasium.farama.org/"><img src="https://img.shields.io/badge/Env-Gymnasium-009688?style=flat-square" alt="Gymnasium" /></a>
+  <a href="https://stable-baselines3.readthedocs.io/"><img src="https://img.shields.io/badge/RL-Stable--Baselines3-FF5722?style=flat-square" alt="Stable-Baselines3" /></a>
+  <a href="https://pcsx2.net/"><img src="https://img.shields.io/badge/Emulator-PCSX2-005C97?style=flat-square" alt="PCSX2" /></a>
+  <a href="https://github.com/ViGEm/ViGEmBus"><img src="https://img.shields.io/badge/Gamepad-ViGEmBus-673AB7?style=flat-square" alt="ViGEmBus" /></a>
+  <img src="https://img.shields.io/badge/Platform-Windows-0078D6?style=flat-square&logo=windows&logoColor=white" alt="Platform" />
+</p>
+
 A Reinforcement Learning environment wrapper designed to train AI agents to play **Kamen Rider: Climax Heroes (PS2)** on Windows using the PCSX2 emulator. It uses real-time screen capture for state observations and virtual controller emulation for input injection.
 
 ---
