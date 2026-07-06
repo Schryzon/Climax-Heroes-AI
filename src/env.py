@@ -80,6 +80,17 @@ class ClimaxHeroesEnv(gym.Env):
             11: self._act_charge_gauge
         }
 
+        # Initialize pygame for manual physical controller override
+        import pygame
+        pygame.init()
+        pygame.joystick.init()
+        self.override_joystick = None
+        if pygame.joystick.get_count() > 0:
+            self.override_joystick = pygame.joystick.Joystick(0)
+            self.override_joystick.init()
+            print(f"[Env] Detected physical joystick for manual override: {self.override_joystick.get_name()}")
+        self.last_user_input_time = 0.0
+
     def _detect_game_window(self):
         keywords = ["仮面ライダー", "PCSX2", "Dolphin", "Climax Heroes"]
         for kw in keywords:
@@ -342,6 +353,39 @@ class ClimaxHeroesEnv(gym.Env):
     def _send_action(self, action):
         if self.gamepad is None:
             return
+            
+        # Check for physical gamepad override input (D-pad, Buttons, Axes)
+        if self.override_joystick is not None:
+            import pygame
+            pygame.event.pump()
+            user_active = False
+            
+            # Check buttons
+            for i in range(self.override_joystick.get_numbuttons()):
+                if self.override_joystick.get_button(i):
+                    user_active = True
+                    break
+            # Check D-pad (hats)
+            if not user_active:
+                for i in range(self.override_joystick.get_numhats()):
+                    if self.override_joystick.get_hat(i) != (0, 0):
+                        user_active = True
+                        break
+            # Check analog sticks (axes)
+            if not user_active:
+                for i in range(self.override_joystick.get_numaxes()):
+                    if abs(self.override_joystick.get_axis(i)) > 0.3:
+                        user_active = True
+                        break
+                        
+            if user_active:
+                # User is actively pressing buttons on the physical controller
+                self.last_user_input_time = time.time()
+                
+            # If user pressed a button within the last 4.0 seconds, silence AI inputs
+            if time.time() - self.last_user_input_time < 4.0:
+                self._release_all()
+                return
         
         # Reset buttons to neutral first, then press the chosen macro action
         self._release_all()
