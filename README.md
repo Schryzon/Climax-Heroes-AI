@@ -91,14 +91,67 @@ Then navigate to `http://localhost:6006` in your browser.
 
 ## State Extraction & Environment Specs
 
-*   **Observation Space:** 4 stacked $84 \times 84$ grayscale frames (standard for Atari-like RL agents).
-*   **Action Space:** 12 discrete macro actions (Idle, Walk Forward, Walk Backward/Guard, Jump, Attack combos, Special, Rider Finale, Evade, Meter Charge).
-*   **Layered HP Tracker:** Detects HP from `0` to `300` across 3 stacks (Green $\rightarrow$ Yellow $\rightarrow$ Red) using HSV masks.
-*   **Guard & Rider Gauges:** Tracked dynamically using grayscale column summation.
-*   **Dense Reward Formulation:**
-    *   $\pm$ HP Delta (dealing damage vs taking damage).
-    *   $\pm$ Guard Gauge Delta (shield preservation vs crushing opponent's shield).
-    *   $+$ Rider Gauge Delta (accumulating meter).
+*   **Observation Space:** 4 stacked $84 \times 84$ grayscale frames (representing the last 4 frames at 30fps).
+*   **Action Space:** 13 discrete macro actions:
+    *   `0`: Idle / Guard (Blocks attacks)
+    *   `1`: Walk Forward
+    *   `2`: Walk Backward
+    *   `3`: Jump (D-pad Up)
+    *   `4`: Light Attack Combo (Xbox `X`)
+    *   `5`: Heavy Attack Combo (Xbox `Y`)
+    *   `6`: Special Move (Xbox `A` / 2 bars of meter)
+    *   `7`: Normal Finisher (Xbox `B`)
+    *   `8`: Rider Finale (Xbox `RT` / 5 bars of meter)
+    *   `9`: Evade Left (Xbox `LB`)
+    *   `10`: Evade Right (Xbox `RB`)
+    *   `11`: Charge Rider Gauge (D-pad Down)
+    *   `12`: Form Change (Xbox `LT` / 5 bars of meter)
+*   **Continuous Episode Mode:** The environment is configured for continuous infinite-episode training (`terminated = False`, `truncated = False`). Resets are managed manually or through external emulation state resets, letting the AI train seamlessly across multiple matches.
+*   **Persistent Gamepad Lifecycle:** Rebuilt using a persistent virtual driver lifecycle. The virtual controller remains connected throughout the entire Python process, preventing emulators (PCSX2/Dolphin) from losing Port 1 gamepad mappings.
+*   **Multi-Gamepad Manual Takeover:** Scans all connected physical joysticks in real-time. Pressing any face button or D-pad direction immediately silences AI inputs for **4.0 seconds**, enabling seamless human takeover for manual positioning or resets.
+
+### Detailed Reward Formulation
+
+To guide policy optimization and prevent reward hacking, the environment utilizes a dense, risk-adjusted reward structure:
+
+1.  **HP Damage Trade-offs:**
+    *   **Damage Dealt:** `+1.0` per point of HP damage dealt.
+    *   **Guard Broken Hit:** `+2.0` per point of HP damage dealt while the opponent is guard-broken.
+    *   **Finisher Hit Bonus:** `+3.0` per point of HP damage + a flat `+25.0` bonus for landing a Rider Finale (Action 8).
+    *   **Damage Taken:** `-1.2` per point of HP damage taken.
+    *   **Missed Finisher Penalty:** `-15.0` penalty if a Rider Finale is attempted but deals `0` damage.
+2.  **Shield & Guard Management:**
+    *   **Shield Damage Dealt:** `+0.3` per point of opponent guard gauge reduction.
+    *   **Guard Crush Bonus:** `+15.0` bonus for completely breaking the opponent's shield.
+    *   **Successful Block:** `+0.20` per point of shield reduction if the AI blocks an attack without taking HP damage.
+    *   **Failed Block:** `-0.15` per point of shield reduction if the AI is hit.
+3.  **Special Meter (Rider Gauge):**
+    *   **Meter Gained:** `+0.30` per unit of meter generated.
+    *   **Form Change / Finisher Exploration:** `+5.0` one-time bonus for the first L2/R2 attempt when meter is full ($\ge 95.0$).
+4.  **Dodge Cost:**
+    *   **Evade Penalty:** `-0.08` per dodge action (Action 9 & 10) to penalize infinite dodge-spamming, forcing the AI to balance defense with active combat.
+5.  **Combo Bonus:**
+    *   `+0.1` per combo hit count to encourage chaining attacks.
+
+### In-Game HUD Coordinate Mapping
+
+To parse stats from the emulator, the environment checks specific boundary regions of the **1024 × 576** game window:
+
+<p align="center">
+  <img src="assets/hud_annotations.png" alt="HUD Coordinates Mapping" width="90%" />
+</p>
+
+| HUD Element | Normalized X-Range | Normalized Y-Range | Absolute X-Range ($1024 \text{px}$) | Absolute Y-Range ($576 \text{px}$) | Bounding Box |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **P1 HP Bar** | `[0.220, 0.445]` | `[0.087, 0.113]` | `[225, 455]` | `[50, 65]` | **Green** |
+| **P2 HP Bar** | `[0.555, 0.780]` | `[0.087, 0.113]` | `[568, 798]` | `[50, 65]` | **Green** |
+| **P1 Guard Gauge** | `[0.220, 0.336]` | `[0.120, 0.138]` | `[225, 344]` | `[69, 79]` | **Cyan** |
+| **P2 Guard Gauge** | `[0.664, 0.780]` | `[0.120, 0.138]` | `[679, 798]` | `[69, 79]` | **Cyan** |
+| **P1 Rounds Won** | `[0.441, 0.472]` | `[0.137, 0.212]` | `[451, 483]` | `[78, 122]` | **Orange** |
+| **P2 Rounds Won** | `[0.528, 0.559]` | `[0.137, 0.212]` | `[540, 572]` | `[78, 122]` | **Orange** |
+| **Infinity Timer** | `[0.470, 0.530]` | `[0.060, 0.120]` | `[481, 542]` | `[34, 69]` | **White** |
+| **P1 Rider Gauge** | `[0.220, 0.380]` | `[0.884, 0.921]` | `[225, 389]` | `[509, 530]` | **Magenta** |
+| **P2 Rider Gauge** | `[0.620, 0.780]` | `[0.884, 0.921]` | `[634, 798]` | `[509, 530]` | **Magenta** |
 
 ---
 

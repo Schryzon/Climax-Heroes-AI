@@ -120,61 +120,6 @@ class ClimaxHeroesEnv(gym.Env):
         # Release all gamepad buttons to a neutral state
         self._release_all()
         
-        # If this is not the first start, handle the menu navigation to rematch!
-        # Replaced the unreliable HP checks with exact Game Over screen checks!
-        raw_img = np.array(self.sct.grab(self.window_region))
-        if self.need_rematch or self._is_survival_game_over(raw_img):
-            print("[Env] Survival Game Over screen detected! Running rematch macro...")
-            self.need_rematch = False
-            
-            def tap(btn):
-                if self.gamepad is not None:
-                    self.gamepad.press_button(button=btn)
-                    self.gamepad.update()
-                    time.sleep(0.05)
-                    self.gamepad.release_button(button=btn)
-                    self.gamepad.update()
-
-            # 0. Circle button (Xbox B) - Click OK prompt just after losing
-            time.sleep(2.5)
-            tap(vg.XUSB_BUTTON.XUSB_GAMEPAD_B)
-
-            # 1. Circle button (Xbox B) - Click Survival mode after the losing animation ends
-            time.sleep(4.0)
-            tap(vg.XUSB_BUTTON.XUSB_GAMEPAD_B)
-            
-            # 2. D-pad Up - Choose Kuuga from Decade (extended delay to ensure menu is fully loaded)
-            time.sleep(7.50)
-            tap(vg.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_UP)
-            
-            # 3. Circle button (Xbox B) - Choose Kuuga (P1)
-            time.sleep(0.42)
-            tap(vg.XUSB_BUTTON.XUSB_GAMEPAD_B)
-            
-            # 4. Circle button (Xbox B) - Choose Dragon Form
-            time.sleep(2.2)
-            tap(vg.XUSB_BUTTON.XUSB_GAMEPAD_B)
-            
-            # 5. Wait for loading screen to finish dynamically by polling HP bars
-            # Sleep 3.0s first to let selection screen graphics clear and transition to black
-            time.sleep(3.0)
-            print("[Env] Polling HP bars for match start...")
-            start_time = time.time()
-            # Wait up to 20 seconds maximum (safety timeout)
-            while time.time() - start_time < 20.0:
-                # Capture current screen frame
-                raw_img = np.array(self.sct.grab(self.window_region))
-                p1_hp, p2_hp = self._read_hps(raw_img)
-                # If both HP bars are successfully detected (>250.0), the round has loaded and started!
-                if p1_hp > 250.0 and p2_hp > 250.0:
-                    print(f"[Env] Match loaded and started! (Polled in {time.time() - start_time:.2f}s)")
-                    # Small 0.3s pause for HUD to fully settle and 'FIGHT' announcer to clear
-                    time.sleep(0.3)
-                    break
-                time.sleep(0.1)
-            else:
-                print("[Env] Warning: Loading screen timeout. Forcing round start.")
-        
         # Capture first frame of the new round
         raw_img = np.array(self.sct.grab(self.window_region))
         gray = cv2.cvtColor(raw_img, cv2.COLOR_BGRA2GRAY)
@@ -214,52 +159,6 @@ class ClimaxHeroesEnv(gym.Env):
         self.frame_stack.append(obs_frame)
         stacked_obs = self._get_stacked_obs()
         
-        # Check for Survival Mode Game Over screen (first image)
-        if self._is_survival_game_over(raw_img):
-            print("[Env] Survival Game Over detected!")
-            self.need_rematch = True
-            terminated = True
-            reward = -100.0  # Big penalty for losing the run!
-            return stacked_obs, reward, terminated, False, {}
-            
-        # Check for loading next map (third image) or VS next opponent splash (second image)
-        if self._is_now_loading_screen(raw_img) or self._is_vs_splash_screen(raw_img):
-            print("[Env] Map transition or next opponent VS splash detected! Pausing and waiting for next round...")
-            self._release_all()
-            reward_transition = 50.0  # Reward AI for advancing to the next round / winning the map!
-            
-            # Poll screen and wait for next match to actually start
-            start_wait = time.time()
-            while time.time() - start_wait < 30.0:
-                time.sleep(0.2)
-                raw_img = np.array(self.sct.grab(self.window_region))
-                
-                # Safety Escape: If the AI actually lost (Game Over screen) while we were waiting, exit immediately!
-                if self._is_survival_game_over(raw_img):
-                    print("[Env] Escape: Survival Game Over detected in transition loop!")
-                    self.need_rematch = True
-                    return stacked_obs, -100.0, True, False, {}
-                    
-                p1_hp, p2_hp = self._read_hps(raw_img)
-                if p1_hp > 250.0 and p2_hp > 250.0:
-                    print(f"[Env] Next map loaded! Resuming gameplay after {time.time() - start_wait:.2f}s.")
-                    # Reset variables for the new round
-                    self.round_steps = 0
-                    self.zero_hp_streak = 0
-                    self.p1_form_changed = False
-                    self.p1_finisher_attempted = False
-                    self.prev_p1_hp = 300.0
-                    self.prev_p2_hp = 300.0
-                    self.prev_p1_guard = 100.0
-                    self.prev_p2_guard = 100.0
-                    self.prev_p1_rider = 0.0
-                    self.prev_p2_rider = 0.0
-                    time.sleep(0.3)
-                    break
-            
-            # Return transition reward
-            return stacked_obs, reward_transition, False, False, {}
-        
         # 4. Extract rewards and check round status
         p1_hp, p2_hp = self._read_hps(raw_img)
         p1_guard, p2_guard = self._read_guard_gauges(raw_img)
@@ -268,12 +167,6 @@ class ClimaxHeroesEnv(gym.Env):
         p1_rounds, p2_rounds = self._read_rounds_won(raw_img)
         is_infinite = self._is_timer_infinite(raw_img)
         
-        # Increment zero HP streak if one player is at 0 HP (transient frame filter)
-        if p1_hp <= 0 or p2_hp <= 0:
-            self.zero_hp_streak += 1
-        else:
-            self.zero_hp_streak = 0
-            
         reward = self._calculate_reward(p1_hp, p2_hp, p1_guard, p2_guard, p1_rider, p2_rider, combo_count, p1_rounds, p2_rounds, is_infinite)
         
         # Update HP and Gauge memory
@@ -284,8 +177,8 @@ class ClimaxHeroesEnv(gym.Env):
         self.prev_p1_rider = p1_rider
         self.prev_p2_rider = p2_rider
         
-        # Check if round is over (only when HP has been 0 for 15 consecutive steps)
-        terminated = (self.zero_hp_streak >= 15)
+        # AI runs infinitely in a single continuous episode
+        terminated = False
         truncated = False
         
         return stacked_obs, reward, terminated, truncated, {}
@@ -587,20 +480,9 @@ class ClimaxHeroesEnv(gym.Env):
         rider_gained = max(0.0, p1_rider - self.prev_p1_rider)
         reward += rider_gained * 0.30  # Encourage active charging
         
-        # Charging trade-off logic (action 11 is D-pad Down / Charge Gauge)
-        if self.last_action == 11:
-            if damage_taken > 0:
-                reward -= damage_taken * 3.0  # Heavy penalty for charging while getting hit!
-                if self.debug:
-                    print(f"[Reward] AI charged while taking damage! Penalty: -{damage_taken * 3.0:.1f}")
-            else:
-                reward += 0.05  # Small bonus for charging safely
-                if self.debug:
-                    print("[Reward] AI charged safely. Bonus: +0.05")
-        
-        # Meter Hoarding Reward: Give a step-wise potential bonus for holding onto full/high meter
-        # This discourages wasting 2 bars on low-value Specials (X) and encourages saving for Finisher (R2)
-        reward += p1_rider * 0.003  # Max +0.3 per step at full 100 meter
+        # Minor dodge action cost to prevent infinite invincibility-frame spamming
+        if self.last_action in [9, 10]:
+            reward -= 0.08
 
         # Form Change (L2) and Finisher (R2) attempt rewards when meter is full (prev_p1_rider >= 95.0)
         # We only reward the first attempt per round to prevent spamming/exploit loops!
@@ -638,51 +520,46 @@ class ClimaxHeroesEnv(gym.Env):
                     
                 reward -= deficit_penalty
             
-        # 6. Round End Win/Loss Rewards (triggers when 0 HP streak confirms end of round)
-        if self.zero_hp_streak >= 15:
-            if p2_hp <= 0 and p1_hp > 0:
-                reward += 100.0  # AI won the round!
-                if self.debug:
-                    print("[Reward] AI Won the Round! +100.0 bonus.")
-            elif p1_hp <= 0 and p2_hp > 0:
-                reward -= 100.0  # AI lost the round!
-                if self.debug:
-                    print("[Reward] AI Lost the Round! -100.0 penalty.")
-            
         return reward
 
     # --- Virtual Controller Action Implementations ---
     def _send_action(self, action):
         if self.gamepad is None:
             return
-            
-        # Check for physical gamepad override input (D-pad, Buttons, Axes)
-        if self.override_joystick is not None:
-            import pygame
-            pygame.event.pump()
-            user_active = False
-            
-            # Check buttons
-            for i in range(self.override_joystick.get_numbuttons()):
-                if self.override_joystick.get_button(i):
-                    user_active = True
-                    break
-            # Check D-pad (hats)
-            if not user_active:
-                for i in range(self.override_joystick.get_numhats()):
-                    if self.override_joystick.get_hat(i) != (0, 0):
+         # Check for physical gamepad override input across all connected controllers
+        import pygame
+        pygame.event.pump()
+        user_active = False
+        
+        for j_idx in range(pygame.joystick.get_count()):
+            try:
+                j = pygame.joystick.Joystick(j_idx)
+                if not j.get_init():
+                    j.init()
+                
+                # Check D-pad (hats)
+                for i in range(j.get_numhats()):
+                    if j.get_hat(i) != (0, 0):
                         user_active = True
                         break
-
-                        
-            if user_active:
-                # User is actively pressing buttons on the physical controller
-                self.last_user_input_time = time.time()
                 
-            # If user pressed a button within the last 4.0 seconds, silence AI inputs
-            if time.time() - self.last_user_input_time < 4.0:
-                self._release_all()
-                return
+                # Check face buttons
+                if not user_active:
+                    for i in range(j.get_numbuttons()):
+                        if j.get_button(i):
+                            user_active = True
+                            break
+            except Exception:
+                pass
+                
+        if user_active:
+            # User is actively pressing buttons or moving sticks
+            self.last_user_input_time = time.time()
+            
+        # If user pressed a button within the last 4.0 seconds, silence AI inputs
+        if time.time() - self.last_user_input_time < 4.0:
+            self._release_all()
+            return
         
         # Reset buttons to neutral first, then press the chosen macro action
         self._release_all()
@@ -741,7 +618,7 @@ class ClimaxHeroesEnv(gym.Env):
         self.gamepad.press_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_RIGHT_SHOULDER)
 
     def _act_charge_gauge(self):
-        self.gamepad.left_joystick(x_value=0, y_value=-32768)
+        self.gamepad.press_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_DOWN)
 
     def _act_form_change(self):
         self.gamepad.left_trigger(value=255)
