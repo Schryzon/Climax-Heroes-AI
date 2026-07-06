@@ -99,3 +99,11 @@ Then navigate to `http://localhost:6006` in your browser.
     *   $\pm$ HP Delta (dealing damage vs taking damage).
     *   $\pm$ Guard Gauge Delta (shield preservation vs crushing opponent's shield).
     *   $+$ Rider Gauge Delta (accumulating meter).
+
+---
+
+## License & Contributing
+
+*   This project is licensed under the **[MIT License](LICENSE)**.
+*   Interested in contributing? Check out our **[Contributing Guidelines](CONTRIBUTING.md)** for coding standards, style guides, and workflow details.
+
