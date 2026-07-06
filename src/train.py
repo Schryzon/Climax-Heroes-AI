@@ -27,33 +27,42 @@ def train():
     print("Initializing environment...")
     env = ClimaxHeroesEnv(debug=True)
     
-    # Configure Checkpoint Callback to save weights periodically
+    # Configure Checkpoint Callback to save weights periodically (every ~8 mins of play)
     checkpoint_callback = CheckpointCallback(
-        save_freq=50000,
+        save_freq=10000,
         save_path="./checkpoints/",
         name_prefix="climax_ppo_model"
     )
     
-    # Configure PPO hyperparameters
-    # Optimized for RTX 3050 4GB (smaller batch size to prevent CUDA OOM)
-    print("Configuring PPO model...")
-    model = PPO(
-        "CnnPolicy",
-        env,
-        learning_rate=3e-4,
-        n_steps=2048,
-        batch_size=64,
-        n_epochs=10,
-        gamma=0.99,
-        gae_lambda=0.95,
-        clip_range=0.2,
-        ent_coef=0.01,
-        vf_coef=0.5,
-        max_grad_norm=0.5,
-        verbose=1,
-        tensorboard_log="./tb_logs/",
-        device=device
-    )
+    # Configure PPO hyperparameters or load existing checkpoints to resume training
+    import glob
+    save_files = glob.glob("./checkpoints/climax_ppo_model_*.zip") + ["climax_ppo_interrupted.zip", "climax_ppo_final.zip"]
+    save_files = [f for f in save_files if os.path.exists(f)]
+    
+    if save_files:
+        latest_save = max(save_files, key=os.path.getmtime)
+        print(f"Found existing saved model weights: {latest_save}")
+        print("Resuming training from loaded weights...")
+        model = PPO.load(latest_save, env=env, device=device)
+    else:
+        print("No existing model weights found. Initializing a new model from scratch...")
+        model = PPO(
+            "CnnPolicy",
+            env,
+            learning_rate=3e-4,
+            n_steps=2048,
+            batch_size=64,
+            n_epochs=10,
+            gamma=0.99,
+            gae_lambda=0.95,
+            clip_range=0.2,
+            ent_coef=0.01,
+            vf_coef=0.5,
+            max_grad_norm=0.5,
+            verbose=1,
+            tensorboard_log="./tb_logs/",
+            device=device
+        )
     
     print("\nStarting training loop...")
     print("To monitor training, run the following in another terminal:")

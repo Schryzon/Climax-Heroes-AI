@@ -90,6 +90,7 @@ class ClimaxHeroesEnv(gym.Env):
             self.override_joystick.init()
             print(f"[Env] Detected physical joystick for manual override: {self.override_joystick.get_name()}")
         self.last_user_input_time = 0.0
+        self.last_action = 0
 
     def _detect_game_window(self):
         keywords = ["仮面ライダー", "PCSX2", "Dolphin", "Climax Heroes"]
@@ -126,8 +127,12 @@ class ClimaxHeroesEnv(gym.Env):
                     self.gamepad.release_button(button=btn)
                     self.gamepad.update()
 
+            # 0. Circle button (Xbox B) - Click OK prompt just after losing
+            time.sleep(2.5)
+            tap(vg.XUSB_BUTTON.XUSB_GAMEPAD_B)
+
             # 1. Circle button (Xbox B) - Click Survival mode after the losing animation ends
-            time.sleep(3.65)
+            time.sleep(4.0)
             tap(vg.XUSB_BUTTON.XUSB_GAMEPAD_B)
             
             # 2. D-pad Up - Choose Kuuga from Decade (extended delay to ensure menu is fully loaded)
@@ -165,6 +170,7 @@ class ClimaxHeroesEnv(gym.Env):
         return self._get_stacked_obs(), {}
 
     def step(self, action):
+        self.last_action = action
         # 1. Execute action through virtual controller
         self._send_action(action)
         
@@ -323,12 +329,28 @@ class ClimaxHeroesEnv(gym.Env):
         # 1. HP damage dealt (to P2) vs taken (by P1)
         damage_dealt = max(0.0, self.prev_p2_hp - p2_hp)
         damage_taken = max(0.0, self.prev_p1_hp - p1_hp)
-        reward = (damage_dealt * 1.0) - (damage_taken * 1.2)
+        
+        # Supercharge damage dealt rewards
+        if damage_dealt > 0:
+            if self.last_action == 8:
+                damage_dealt_reward = (damage_dealt * 3.0) + 25.0  # Massive finisher hit payoff
+            elif p2_guard == 0.0:
+                damage_dealt_reward = damage_dealt * 2.0  # No Mercy: double reward for hitting a guard-broken stun state!
+            else:
+                damage_dealt_reward = damage_dealt * 1.0
+        else:
+            damage_dealt_reward = 0.0
+            
+        reward = damage_dealt_reward - (damage_taken * 1.2)
         
         # 2. Guard Gauge change (shield management: P1 is AI, P2 is Opponent)
-        # Opponent's guard gauge reduction (we want to crush their shield)
+        # Opponent's guard gauge reduction (we want to crush their shield - increased from 0.1 to 0.3 to reward heavy pressure)
         guard_dealt = max(0.0, self.prev_p2_guard - p2_guard)
-        reward += guard_dealt * 0.1
+        reward += guard_dealt * 0.3
+        
+        # Guard Crush bonus (breaking opponent's shield completely)
+        if p2_guard == 0.0 and self.prev_p2_guard > 0.0:
+            reward += 15.0
         
         # AI's guard gauge reduction (we only penalize if they also took HP damage, i.e. failed block)
         # If they took no HP damage, it means they blocked successfully, so we reward it!
@@ -339,9 +361,13 @@ class ClimaxHeroesEnv(gym.Env):
             else:
                 reward += guard_taken * 0.20  # Successful block (absorbed hit on shield!)
                 
-        # 3. Rider Gauge change (generating special meter is good for AI P1)
+        # 3. Rider Gauge change & Potential (generating special meter is good for AI P1)
         rider_gained = max(0.0, p1_rider - self.prev_p1_rider)
-        reward += rider_gained * 0.30  # Increased from 0.05 to 0.30 to encourage charging!
+        reward += rider_gained * 0.30  # Encourage active charging
+        
+        # Meter Hoarding Reward: Give a step-wise potential bonus for holding onto full/high meter
+        # This discourages wasting 2 bars on low-value Specials (X) and encourages saving for Finisher (R2)
+        reward += p1_rider * 0.003  # Max +0.3 per step at full 100 meter
         
         # 4. Combo bonus
         if combo_count > 0:
@@ -371,12 +397,7 @@ class ClimaxHeroesEnv(gym.Env):
                     if self.override_joystick.get_hat(i) != (0, 0):
                         user_active = True
                         break
-            # Check analog sticks (axes)
-            if not user_active:
-                for i in range(self.override_joystick.get_numaxes()):
-                    if abs(self.override_joystick.get_axis(i)) > 0.3:
-                        user_active = True
-                        break
+
                         
             if user_active:
                 # User is actively pressing buttons on the physical controller
