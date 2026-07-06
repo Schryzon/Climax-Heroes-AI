@@ -1,4 +1,4 @@
-# Climax Heroes AI 🎮
+# Kamen Rider: Climax Heroes AI 🎮
 
 <p align="center">
   <img src="assets/banner.png" alt="Climax Heroes AI Banner" width="80%" />
@@ -13,7 +13,7 @@
   <img src="https://img.shields.io/badge/Platform-Windows-0078D6?style=flat-square&logo=windows&logoColor=white" alt="Platform" />
 </p>
 
-A Reinforcement Learning environment wrapper designed to train AI agents to play **Kamen Rider: Climax Heroes (PS2)** on Windows using the PCSX2 emulator. It uses real-time screen capture for state observations and virtual controller emulation for input injection.
+A Reinforcement Learning environment wrapper designed to train **Hiyori**, a custom AI agent, to play **Kamen Rider: Climax Heroes (PS2)** on Windows using the PCSX2 emulator. It uses real-time screen capture for state observations and virtual controller emulation for input injection.
 
 ---
 
