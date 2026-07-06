@@ -94,6 +94,9 @@ class ClimaxHeroesEnv(gym.Env):
         self.last_action = 0
         self.round_steps = 0
         self.zero_hp_streak = 0
+        self.p1_form_changed = False
+        self.p1_finisher_attempted = False
+        self.need_rematch = False
 
     def _detect_game_window(self):
         keywords = ["仮面ライダー", "PCSX2", "Dolphin", "Climax Heroes"]
@@ -118,9 +121,11 @@ class ClimaxHeroesEnv(gym.Env):
         self._release_all()
         
         # If this is not the first start, handle the menu navigation to rematch!
-        # Initial state HP is set to 300.0, so if either HP is less than 300.0, a round just ended.
-        if self.prev_p1_hp < 300.0 or self.prev_p2_hp < 300.0:
-            print("[Env] Match ended. Executing recorded rematch macro...")
+        # Replaced the unreliable HP checks with exact Game Over screen checks!
+        raw_img = np.array(self.sct.grab(self.window_region))
+        if self.need_rematch or self._is_survival_game_over(raw_img):
+            print("[Env] Survival Game Over screen detected! Running rematch macro...")
+            self.need_rematch = False
             
             def tap(btn):
                 if self.gamepad is not None:
@@ -150,10 +155,25 @@ class ClimaxHeroesEnv(gym.Env):
             time.sleep(2.2)
             tap(vg.XUSB_BUTTON.XUSB_GAMEPAD_B)
             
-            # 5. Wait for loading screen to load the match
-            print("[Env] Waiting for loading screen...")
-            time.sleep(10.0)
-            print("[Env] Rematch loaded! Battle starting.")
+            # 5. Wait for loading screen to finish dynamically by polling HP bars
+            # Sleep 3.0s first to let selection screen graphics clear and transition to black
+            time.sleep(3.0)
+            print("[Env] Polling HP bars for match start...")
+            start_time = time.time()
+            # Wait up to 20 seconds maximum (safety timeout)
+            while time.time() - start_time < 20.0:
+                # Capture current screen frame
+                raw_img = np.array(self.sct.grab(self.window_region))
+                p1_hp, p2_hp = self._read_hps(raw_img)
+                # If both HP bars are successfully detected (>250.0), the round has loaded and started!
+                if p1_hp > 250.0 and p2_hp > 250.0:
+                    print(f"[Env] Match loaded and started! (Polled in {time.time() - start_time:.2f}s)")
+                    # Small 0.3s pause for HUD to fully settle and 'FIGHT' announcer to clear
+                    time.sleep(0.3)
+                    break
+                time.sleep(0.1)
+            else:
+                print("[Env] Warning: Loading screen timeout. Forcing round start.")
         
         # Capture first frame of the new round
         raw_img = np.array(self.sct.grab(self.window_region))
@@ -170,6 +190,9 @@ class ClimaxHeroesEnv(gym.Env):
         self.prev_p1_rider = 0.0
         self.prev_p2_rider = 0.0
         self.round_steps = 0
+        self.zero_hp_streak = 0
+        self.p1_form_changed = False
+        self.p1_finisher_attempted = False
         
         return self._get_stacked_obs(), {}
 
@@ -190,6 +213,45 @@ class ClimaxHeroesEnv(gym.Env):
         obs_frame = cv2.resize(gray, (84, 84))
         self.frame_stack.append(obs_frame)
         stacked_obs = self._get_stacked_obs()
+        
+        # Check for Survival Mode Game Over screen (first image)
+        if self._is_survival_game_over(raw_img):
+            print("[Env] Survival Game Over detected!")
+            self.need_rematch = True
+            terminated = True
+            reward = -100.0  # Big penalty for losing the run!
+            return stacked_obs, reward, terminated, False, {}
+            
+        # Check for loading next map (third image) or VS next opponent splash (second image)
+        if self._is_now_loading_screen(raw_img) or self._is_vs_splash_screen(raw_img):
+            print("[Env] Map transition or next opponent VS splash detected! Pausing and waiting for next round...")
+            self._release_all()
+            reward_transition = 50.0  # Reward AI for advancing to the next round / winning the map!
+            
+            # Poll screen and wait for next match to actually start
+            start_wait = time.time()
+            while time.time() - start_wait < 30.0:
+                time.sleep(0.2)
+                raw_img = np.array(self.sct.grab(self.window_region))
+                p1_hp, p2_hp = self._read_hps(raw_img)
+                if p1_hp > 250.0 and p2_hp > 250.0:
+                    print(f"[Env] Next map loaded! Resuming gameplay after {time.time() - start_wait:.2f}s.")
+                    # Reset variables for the new round
+                    self.round_steps = 0
+                    self.zero_hp_streak = 0
+                    self.p1_form_changed = False
+                    self.p1_finisher_attempted = False
+                    self.prev_p1_hp = 300.0
+                    self.prev_p2_hp = 300.0
+                    self.prev_p1_guard = 100.0
+                    self.prev_p2_guard = 100.0
+                    self.prev_p1_rider = 0.0
+                    self.prev_p2_rider = 0.0
+                    time.sleep(0.3)
+                    break
+            
+            # Return transition reward
+            return stacked_obs, reward_transition, False, False, {}
         
         # 4. Extract rewards and check round status
         p1_hp, p2_hp = self._read_hps(raw_img)
@@ -223,8 +285,11 @@ class ClimaxHeroesEnv(gym.Env):
 
     def close(self):
         self.sct.close()
+        # Keep the virtual gamepad connected during the Python process lifecycle
+        # to prevent emulators (PCSX2/Dolphin) from losing Port 1 mapping.
+        # It will automatically disconnect when the Python interpreter exits.
         if self.gamepad is not None:
-            del self.gamepad
+            self._release_all()
 
     # --- Observation Capture ---
     def _get_stacked_obs(self):
@@ -405,6 +470,68 @@ class ClimaxHeroesEnv(gym.Env):
         
         return np.sum(mask > 0) > 100
 
+    def _is_survival_game_over(self, img):
+        h, w, _ = img.shape
+        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+        
+        # Crop the bottom banner area: y = [0.60, 0.85], x = [0.10, 0.90]
+        # In 1024x575: y: 345 to 488, x: 102 to 921
+        banner_area = hsv[345:488, 102:921]
+        
+        # Teal HSV range for the banner background
+        lower_teal = np.array([85, 100, 100])
+        upper_teal = np.array([115, 255, 255])
+        mask_teal = cv2.inRange(banner_area, lower_teal, upper_teal)
+        
+        # Crop the Proceed button pill area on the right: y = [380, 460], x = [700, 880]
+        proceed_hsv = hsv[380:460, 700:880]
+        
+        # Red HSV range for the Circle button prompt inside the pill
+        lower_red1 = np.array([0, 100, 100])
+        upper_red1 = np.array([10, 255, 255])
+        lower_red2 = np.array([170, 100, 100])
+        upper_red2 = np.array([180, 255, 255])
+        mask_red1 = cv2.inRange(proceed_hsv, lower_red1, upper_red1)
+        mask_red2 = cv2.inRange(proceed_hsv, lower_red2, upper_red2)
+        mask_red = cv2.bitwise_or(mask_red1, mask_red2)
+        
+        return np.sum(mask_teal > 0) > 30000 and np.sum(mask_red > 0) > 100
+
+    def _is_vs_splash_screen(self, img):
+        h, w, _ = img.shape
+        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+        
+        # Green backdrop boxes (Hue: 35-85, Sat: 100-255, Val: 100-255)
+        lower_green = np.array([35, 100, 100])
+        upper_green = np.array([85, 255, 255])
+        mask_green = cv2.inRange(hsv, lower_green, upper_green)
+        
+        # Orange/red background canvas (Hue: 10-30, Sat: 100-255, Val: 100-255)
+        lower_orange = np.array([10, 100, 100])
+        upper_orange = np.array([30, 255, 255])
+        mask_orange = cv2.inRange(hsv, lower_orange, upper_orange)
+        
+        return np.sum(mask_green > 0) > 30000 and np.sum(mask_orange > 0) > 40000
+
+    def _is_now_loading_screen(self, img):
+        h, w, _ = img.shape
+        
+        # Crop around the pink card symbol on the bottom black bar:
+        # x = [0.50, 0.60], y = [0.78, 0.94]
+        c_x1, c_x2 = int(w * 0.50), int(w * 0.60)
+        c_y1, c_y2 = int(h * 0.78), int(h * 0.94)
+        
+        card_crop = img[c_y1:c_y2, c_x1:c_x2]
+        if card_crop.size == 0:
+            return False
+            
+        hsv = cv2.cvtColor(card_crop, cv2.COLOR_BGR2HSV)
+        lower_pink = np.array([140, 80, 80])
+        upper_pink = np.array([170, 255, 255])
+        mask_pink = cv2.inRange(hsv, lower_pink, upper_pink)
+        
+        return np.sum(mask_pink > 0) > 100
+
     def _calculate_reward(self, p1_hp, p2_hp, p1_guard, p2_guard, p1_rider, p2_rider, combo_count, p1_rounds, p2_rounds, is_infinite):
         # 1. HP damage dealt (to P2) vs taken (by P1)
         damage_dealt = max(0.0, self.prev_p2_hp - p2_hp)
@@ -449,21 +576,34 @@ class ClimaxHeroesEnv(gym.Env):
         rider_gained = max(0.0, p1_rider - self.prev_p1_rider)
         reward += rider_gained * 0.30  # Encourage active charging
         
+        # Charging trade-off logic (action 11 is D-pad Down / Charge Gauge)
+        if self.last_action == 11:
+            if damage_taken > 0:
+                reward -= damage_taken * 3.0  # Heavy penalty for charging while getting hit!
+                if self.debug:
+                    print(f"[Reward] AI charged while taking damage! Penalty: -{damage_taken * 3.0:.1f}")
+            else:
+                reward += 0.05  # Small bonus for charging safely
+                if self.debug:
+                    print("[Reward] AI charged safely. Bonus: +0.05")
+        
         # Meter Hoarding Reward: Give a step-wise potential bonus for holding onto full/high meter
         # This discourages wasting 2 bars on low-value Specials (X) and encourages saving for Finisher (R2)
         reward += p1_rider * 0.003  # Max +0.3 per step at full 100 meter
 
         # Form Change (L2) and Finisher (R2) attempt rewards when meter is full (prev_p1_rider >= 95.0)
-        # We actively reward these macro moves to encourage exploration and usage of full meter mechanics!
+        # We only reward the first attempt per round to prevent spamming/exploit loops!
         if self.prev_p1_rider >= 95.0:
-            if self.last_action == 12:  # Form Change (L2)
-                reward += 10.0
+            if self.last_action == 12 and not self.p1_form_changed:  # Form Change (L2)
+                reward += 5.0
+                self.p1_form_changed = True
                 if self.debug:
-                    print("[Reward] Form Change triggered with full meter! +10.0 bonus.")
-            elif self.last_action == 8:  # Rider Finale (R2)
-                reward += 10.0
+                    print("[Reward] First Form Change triggered! +5.0 bonus.")
+            elif self.last_action == 8 and not self.p1_finisher_attempted:  # Rider Finale (R2)
+                reward += 5.0
+                self.p1_finisher_attempted = True
                 if self.debug:
-                    print("[Reward] Rider Finale triggered with full meter! +10.0 bonus.")
+                    print("[Reward] First Rider Finale triggered! +5.0 bonus.")
         
         # 4. Combo bonus
         if combo_count > 0:
@@ -477,16 +617,15 @@ class ClimaxHeroesEnv(gym.Env):
                 # Double all damage dealt rewards in desperation phase
                 if damage_dealt > 0:
                     reward += damage_dealt_reward * 1.0  # extra 1.0x (total 2.0x, or 4.0x if guard is crushed!)
-                
                 # Step penalty based on HP deficit, forcing the AI to attack aggressively to close the gap
                 hp_deficit = p2_hp - p1_hp
                 deficit_penalty = hp_deficit * 0.05
                 
-            # If we are also down on rounds won (opponent has won a round, and we haven't), double the deficit penalty!
-            if p2_rounds > p1_rounds:
-                deficit_penalty *= 2.0
-                
-            reward -= deficit_penalty
+                # If we are also down on rounds won (opponent has won a round, and we haven't), double the deficit penalty!
+                if p2_rounds > p1_rounds:
+                    deficit_penalty *= 2.0
+                    
+                reward -= deficit_penalty
             
         # 6. Round End Win/Loss Rewards (triggers when 0 HP streak confirms end of round)
         if self.zero_hp_streak >= 15:
@@ -536,12 +675,17 @@ class ClimaxHeroesEnv(gym.Env):
         
         # Reset buttons to neutral first, then press the chosen macro action
         self._release_all()
-        self.ACTION_MAP[action]()
-        self.gamepad.update()
+        if self.gamepad is not None:
+            self.ACTION_MAP[action]()
+            self.gamepad.update()
 
     def _release_all(self):
         if self.gamepad is None:
-            return
+            if vg is not None:
+                self.gamepad = vg.VX360Gamepad()
+                print("[Env] Gamepad re-initialized dynamically.")
+            else:
+                return
         # Reset all standard buttons
         self.gamepad.reset()
         # Reset joysticks/d-pad to neutral
