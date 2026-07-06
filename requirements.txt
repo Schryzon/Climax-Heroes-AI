@@ -1,0 +1,7 @@
+numpy
+opencv-python
+mss
+pygetwindow
+gymnasium
+stable-baselines3
+vgamepad
