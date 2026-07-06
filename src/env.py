@@ -32,8 +32,8 @@ class ClimaxHeroesEnv(gym.Env):
         super().__init__()
         self.debug = debug
         
-        # Action space: 12 discrete macro actions mapped to Xbox controller buttons
-        self.action_space = gym.spaces.Discrete(12)
+        # Action space: 13 discrete macro actions mapped to Xbox controller buttons
+        self.action_space = gym.spaces.Discrete(13)
         
         # Observation space: 4 stacked 84x84 grayscale frames
         self.observation_space = gym.spaces.Box(
@@ -77,7 +77,8 @@ class ClimaxHeroesEnv(gym.Env):
             8: self._act_rider_finale,
             9: self._act_evade_left,
             10: self._act_evade_right,
-            11: self._act_charge_gauge
+            11: self._act_charge_gauge,
+            12: self._act_form_change
         }
 
         # Initialize pygame for manual physical controller override
@@ -91,6 +92,8 @@ class ClimaxHeroesEnv(gym.Env):
             print(f"[Env] Detected physical joystick for manual override: {self.override_joystick.get_name()}")
         self.last_user_input_time = 0.0
         self.last_action = 0
+        self.round_steps = 0
+        self.zero_hp_streak = 0
 
     def _detect_game_window(self):
         keywords = ["仮面ライダー", "PCSX2", "Dolphin", "Climax Heroes"]
@@ -166,11 +169,13 @@ class ClimaxHeroesEnv(gym.Env):
         self.prev_p2_guard = 100.0
         self.prev_p1_rider = 0.0
         self.prev_p2_rider = 0.0
+        self.round_steps = 0
         
         return self._get_stacked_obs(), {}
 
     def step(self, action):
         self.last_action = action
+        self.round_steps += 1
         # 1. Execute action through virtual controller
         self._send_action(action)
         
@@ -191,8 +196,16 @@ class ClimaxHeroesEnv(gym.Env):
         p1_guard, p2_guard = self._read_guard_gauges(raw_img)
         p1_rider, p2_rider = self._read_rider_gauges(raw_img)
         combo_count = self._read_combo_count(raw_img)
+        p1_rounds, p2_rounds = self._read_rounds_won(raw_img)
+        is_infinite = self._is_timer_infinite(raw_img)
         
-        reward = self._calculate_reward(p1_hp, p2_hp, p1_guard, p2_guard, p1_rider, p2_rider, combo_count)
+        # Increment zero HP streak if one player is at 0 HP (transient frame filter)
+        if p1_hp <= 0 or p2_hp <= 0:
+            self.zero_hp_streak += 1
+        else:
+            self.zero_hp_streak = 0
+            
+        reward = self._calculate_reward(p1_hp, p2_hp, p1_guard, p2_guard, p1_rider, p2_rider, combo_count, p1_rounds, p2_rounds, is_infinite)
         
         # Update HP and Gauge memory
         self.prev_p1_hp = p1_hp
@@ -202,8 +215,8 @@ class ClimaxHeroesEnv(gym.Env):
         self.prev_p1_rider = p1_rider
         self.prev_p2_rider = p2_rider
         
-        # Check if round is over (either HP hits zero)
-        terminated = (p1_hp <= 0 or p2_hp <= 0)
+        # Check if round is over (only when HP has been 0 for 15 consecutive steps)
+        terminated = (self.zero_hp_streak >= 15)
         truncated = False
         
         return stacked_obs, reward, terminated, truncated, {}
@@ -325,7 +338,62 @@ class ClimaxHeroesEnv(gym.Env):
         # Optional: OCR / template-matching for combo count later
         return 0
 
-    def _calculate_reward(self, p1_hp, p2_hp, p1_guard, p2_guard, p1_rider, p2_rider, combo_count):
+    def _read_rounds_won(self, img):
+        h, w, _ = img.shape
+        p1_x1, p1_x2 = int(w * 0.441), int(w * 0.472)
+        p2_x1, p2_x2 = int(w * 0.528), int(w * 0.559)
+        y1, y2 = int(h * 0.137), int(h * 0.212) # Extended to 0.212 to capture all the way to the bottom
+        
+        p1_crop = img[y1:y2, p1_x1:p1_x2]
+        p2_crop = img[y1:y2, p2_x1:p2_x2]
+        
+        if p1_crop.size == 0 or p2_crop.size == 0:
+            return 0, 0
+            
+        hsv_p1 = cv2.cvtColor(p1_crop, cv2.COLOR_BGR2HSV)
+        hsv_p2 = cv2.cvtColor(p2_crop, cv2.COLOR_BGR2HSV)
+        
+        lower_yellow = np.array([15, 80, 80])
+        upper_yellow = np.array([45, 255, 255])
+        
+        mask_p1 = cv2.inRange(hsv_p1, lower_yellow, upper_yellow)
+        mask_p2 = cv2.inRange(hsv_p2, lower_yellow, upper_yellow)
+        
+        p1_yellow_pixels = np.sum(mask_p1 > 0)
+        p2_yellow_pixels = np.sum(mask_p2 > 0)
+        
+        p1_rounds = 0
+        if p1_yellow_pixels >= 350: # Scaled threshold for extended height
+            p1_rounds = 2
+        elif p1_yellow_pixels >= 25:
+            p1_rounds = 1
+            
+        p2_rounds = 0
+        if p2_yellow_pixels >= 350:
+            p2_rounds = 2
+        elif p2_yellow_pixels >= 25:
+            p2_rounds = 1
+            
+        return p1_rounds, p2_rounds
+
+    def _is_timer_infinite(self, img):
+        h, w, _ = img.shape
+        t_x1, t_x2 = int(w * 0.47), int(w * 0.53)
+        t_y1, t_y2 = int(h * 0.06), int(h * 0.12)
+        
+        timer_crop = img[t_y1:t_y2, t_x1:t_x2]
+        if timer_crop.size == 0:
+            return False
+            
+        hsv = cv2.cvtColor(timer_crop, cv2.COLOR_BGR2HSV)
+        # Mint green HSV range for the infinity symbol
+        lower_mint = np.array([40, 30, 150])
+        upper_mint = np.array([80, 180, 255])
+        mask = cv2.inRange(hsv, lower_mint, upper_mint)
+        
+        return np.sum(mask > 0) > 100
+
+    def _calculate_reward(self, p1_hp, p2_hp, p1_guard, p2_guard, p1_rider, p2_rider, combo_count, p1_rounds, p2_rounds, is_infinite):
         # 1. HP damage dealt (to P2) vs taken (by P1)
         damage_dealt = max(0.0, self.prev_p2_hp - p2_hp)
         damage_taken = max(0.0, self.prev_p1_hp - p1_hp)
@@ -342,6 +410,10 @@ class ClimaxHeroesEnv(gym.Env):
             damage_dealt_reward = 0.0
             
         reward = damage_dealt_reward - (damage_taken * 1.2)
+        
+        # Penalize missed/wasted finisher (action 8 executed but dealt 0 damage)
+        if damage_dealt == 0 and self.last_action == 8:
+            reward -= 15.0
         
         # 2. Guard Gauge change (shield management: P1 is AI, P2 is Opponent)
         # Opponent's guard gauge reduction (we want to crush their shield - increased from 0.1 to 0.3 to reward heavy pressure)
@@ -368,10 +440,52 @@ class ClimaxHeroesEnv(gym.Env):
         # Meter Hoarding Reward: Give a step-wise potential bonus for holding onto full/high meter
         # This discourages wasting 2 bars on low-value Specials (X) and encourages saving for Finisher (R2)
         reward += p1_rider * 0.003  # Max +0.3 per step at full 100 meter
+
+        # Form Change (L2) and Finisher (R2) attempt rewards when meter is full (prev_p1_rider >= 95.0)
+        # We actively reward these macro moves to encourage exploration and usage of full meter mechanics!
+        if self.prev_p1_rider >= 95.0:
+            if self.last_action == 12:  # Form Change (L2)
+                reward += 10.0
+                if self.debug:
+                    print("[Reward] Form Change triggered with full meter! +10.0 bonus.")
+            elif self.last_action == 8:  # Rider Finale (R2)
+                reward += 10.0
+                if self.debug:
+                    print("[Reward] Rider Finale triggered with full meter! +10.0 bonus.")
         
         # 4. Combo bonus
         if combo_count > 0:
             reward += combo_count * 0.1
+            
+        # 5. Desperation Mode (only active when timer is finite)
+        if not is_infinite:
+            time_left = max(0.0, 99.0 - (self.round_steps / 30.0))
+            if time_left < 20.0 and p1_hp < p2_hp:
+                # We are losing by HP and time is running out!
+                # Double all damage dealt rewards in desperation phase
+                if damage_dealt > 0:
+                    reward += damage_dealt_reward * 1.0  # extra 1.0x (total 2.0x, or 4.0x if guard is crushed!)
+                
+                # Step penalty based on HP deficit, forcing the AI to attack aggressively to close the gap
+                hp_deficit = p2_hp - p1_hp
+                deficit_penalty = hp_deficit * 0.05
+                
+            # If we are also down on rounds won (opponent has won a round, and we haven't), double the deficit penalty!
+            if p2_rounds > p1_rounds:
+                deficit_penalty *= 2.0
+                
+            reward -= deficit_penalty
+            
+        # 6. Round End Win/Loss Rewards (triggers when 0 HP streak confirms end of round)
+        if self.zero_hp_streak >= 15:
+            if p2_hp <= 0 and p1_hp > 0:
+                reward += 100.0  # AI won the round!
+                if self.debug:
+                    print("[Reward] AI Won the Round! +100.0 bonus.")
+            elif p1_hp <= 0 and p2_hp > 0:
+                reward -= 100.0  # AI lost the round!
+                if self.debug:
+                    print("[Reward] AI Lost the Round! -100.0 penalty.")
             
         return reward
 
@@ -420,6 +534,8 @@ class ClimaxHeroesEnv(gym.Env):
         self.gamepad.reset()
         # Reset joysticks/d-pad to neutral
         self.gamepad.left_joystick(x_value=0, y_value=0)
+        self.gamepad.left_trigger(value=0)
+        self.gamepad.right_trigger(value=0)
         self.gamepad.update()
 
     # Xbox controller mappings corresponding to the PS2 buttons:
@@ -459,3 +575,6 @@ class ClimaxHeroesEnv(gym.Env):
 
     def _act_charge_gauge(self):
         self.gamepad.left_joystick(x_value=0, y_value=-32768)
+
+    def _act_form_change(self):
+        self.gamepad.left_trigger(value=255)

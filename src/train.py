@@ -39,13 +39,20 @@ def train():
     save_files = glob.glob("./checkpoints/climax_ppo_model_*.zip") + ["climax_ppo_interrupted.zip", "climax_ppo_final.zip"]
     save_files = [f for f in save_files if os.path.exists(f)]
     
+    model = None
     if save_files:
         latest_save = max(save_files, key=os.path.getmtime)
         print(f"Found existing saved model weights: {latest_save}")
         print("Resuming training from loaded weights...")
-        model = PPO.load(latest_save, env=env, device=device)
-    else:
-        print("No existing model weights found. Initializing a new model from scratch...")
+        try:
+            model = PPO.load(latest_save, env=env, device=device)
+        except Exception as e:
+            print(f"Warning: Failed to load saved weights ({e}).")
+            print("Action space size or model shape may have changed. Fallback to initializing from scratch...")
+            model = None
+            
+    if model is None:
+        print("Initializing a new model from scratch...")
         model = PPO(
             "CnnPolicy",
             env,
