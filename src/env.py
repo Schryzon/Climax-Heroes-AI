@@ -105,30 +105,33 @@ class ClimaxHeroesEnv(gym.Env):
         # If this is not the first start, handle the menu navigation to rematch!
         # Initial state HP is set to 300.0, so if either HP is less than 300.0, a round just ended.
         if self.prev_p1_hp < 300.0 or self.prev_p2_hp < 300.0:
-            print("[Env] Match ended. Starting automated rematch menu selection...")
-            # 1. Dismiss results screens (tap A every 1.5s for 7.5s)
-            for _ in range(5):
+            print("[Env] Match ended. Executing recorded rematch macro...")
+            
+            def tap(btn):
                 if self.gamepad is not None:
-                    self.gamepad.press_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_A)
+                    self.gamepad.press_button(button=btn)
                     self.gamepad.update()
                     time.sleep(0.05)
-                    self.gamepad.release_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_A)
+                    self.gamepad.release_button(button=btn)
                     self.gamepad.update()
-                time.sleep(1.45)
-                
-            # 2. Select character (we should now be on Character Select screen)
-            # Tap A 6 times to pick P1 -> Form -> P2 -> Form -> Stage -> Start
-            print("[Env] Selecting characters (Kuuga vs Kuuga) and Stage...")
-            for _ in range(6):
-                if self.gamepad is not None:
-                    self.gamepad.press_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_A)
-                    self.gamepad.update()
-                    time.sleep(0.05)
-                    self.gamepad.release_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_A)
-                    self.gamepad.update()
-                time.sleep(0.8)
-                
-            # 3. Wait for loading screen to load the match
+
+            # 1. Circle button (Xbox B) - Click Survival mode
+            time.sleep(3.65)
+            tap(vg.XUSB_BUTTON.XUSB_GAMEPAD_B)
+            
+            # 2. D-pad Up - Choose Kuuga from Decade
+            time.sleep(6.36)
+            tap(vg.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_UP)
+            
+            # 3. Circle button (Xbox B) - Choose Kuuga (P1)
+            time.sleep(0.42)
+            tap(vg.XUSB_BUTTON.XUSB_GAMEPAD_B)
+            
+            # 4. Circle button (Xbox B) - Choose Dragon Form
+            time.sleep(2.2)
+            tap(vg.XUSB_BUTTON.XUSB_GAMEPAD_B)
+            
+            # 5. Wait for loading screen to load the match
             print("[Env] Waiting for loading screen...")
             time.sleep(6.0)
             print("[Env] Rematch loaded! Battle starting.")
