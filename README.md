@@ -92,7 +92,7 @@ Then navigate to `http://localhost:6006` in your browser.
 ## State Extraction & Environment Specs
 
 *   **Observation Space:** 4 stacked $84 \times 84$ grayscale frames (representing the last 4 frames at 30fps).
-*   **Action Space:** 13 discrete macro actions:
+*   **Action Space:** 15 discrete macro actions:
     *   `0`: Idle / Guard (Blocks attacks)
     *   `1`: Walk Forward
     *   `2`: Walk Backward
@@ -106,6 +106,8 @@ Then navigate to `http://localhost:6006` in your browser.
     *   `10`: Evade Right (Xbox `RB`)
     *   `11`: Charge Rider Gauge (D-pad Down)
     *   `12`: Form Change (Xbox `LT` / 5 bars of meter)
+    *   `13`: Attack Cancel Right (D-pad Double-tap Right / Cancel animation facing Right)
+    *   `14`: Attack Cancel Left (D-pad Double-tap Left / Cancel animation facing Left)
 *   **Continuous Episode Mode:** The environment is configured for continuous infinite-episode training (`terminated = False`, `truncated = False`). Resets are managed manually or through external emulation state resets, letting the AI train seamlessly across multiple matches.
 *   **Persistent Gamepad Lifecycle:** Rebuilt using a persistent virtual driver lifecycle. The virtual controller remains connected throughout the entire Python process, preventing emulators (PCSX2/Dolphin) from losing Port 1 gamepad mappings.
 *   **Multi-Gamepad Manual Takeover:** Scans all connected physical joysticks in real-time. Pressing any face button or D-pad direction immediately silences AI inputs for **4.0 seconds**, enabling seamless human takeover for manual positioning or resets.
@@ -152,6 +154,21 @@ To parse stats from the emulator, the environment checks specific boundary regio
 | **Infinity Timer** | `[0.470, 0.530]` | `[0.060, 0.120]` | `[481, 542]` | `[34, 69]` | **White** |
 | **P1 Rider Gauge** | `[0.220, 0.380]` | `[0.884, 0.921]` | `[225, 389]` | `[509, 530]` | **Magenta** |
 | **P2 Rider Gauge** | `[0.620, 0.780]` | `[0.884, 0.921]` | `[634, 798]` | `[509, 530]` | **Magenta** |
+
+---
+
+## Training Expectations & Hardware Requirements
+
+### Training Milestones
+Reinforcement learning in fighting games requires significant exploration. Below are the expected milestones for Hiyori's training:
+*   **100k steps:** Learns basic movement (walking forward/backward) and begins spamming basic attacks.
+*   **500k steps:** Starts incorporating defense (guarding/blocking), manages special meter charging, and avoids hazardous states.
+*   **1M+ steps:** Executes complex sequences, triggers form changes, and lands Rider Finales with strategic timing.
+
+### Hardware Recommendations
+*   **GPU:** Dedicated NVIDIA GPU (RTX 3050 or higher recommended for parallel CNN feature extraction).
+*   **CUDA:** CUDA-enabled PyTorch configuration for high-throughput step processing.
+*   **Emulator Performance:** A stable 30/60 FPS emulation rate in PCSX2 is **critical**. Frame drops or stuttering can poison the state representation (frame stacks) and degrade policy convergence.
 
 ---
 

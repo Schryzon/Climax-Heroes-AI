@@ -56,10 +56,10 @@ def train():
         model = PPO(
             "CnnPolicy",
             env,
-            learning_rate=3e-4,
-            n_steps=2048,
-            batch_size=64,
-            n_epochs=10,
+            learning_rate=2.5e-4,
+            n_steps=512,
+            batch_size=128,
+            n_epochs=4,
             gamma=0.99,
             gae_lambda=0.95,
             clip_range=0.2,
@@ -73,7 +73,7 @@ def train():
     
     print("\nStarting training loop...")
     print("To monitor training, run the following in another terminal:")
-    print("  tensorboard --logdir ./tb_logs/")
+    print("  python312 -m tensorboard --logdir ./tb_logs/")
     print("Press Ctrl+C to stop training and save weights.")
     print("=" * 60)
     

@@ -32,8 +32,8 @@ class ClimaxHeroesEnv(gym.Env):
         super().__init__()
         self.debug = debug
         
-        # Action space: 13 discrete macro actions mapped to Xbox controller buttons
-        self.action_space = gym.spaces.Discrete(13)
+        # Action space: 15 discrete macro actions mapped to Xbox controller buttons
+        self.action_space = gym.spaces.Discrete(15)
         
         # Observation space: 4 stacked 84x84 grayscale frames
         self.observation_space = gym.spaces.Box(
@@ -78,7 +78,9 @@ class ClimaxHeroesEnv(gym.Env):
             9: self._act_evade_left,
             10: self._act_evade_right,
             11: self._act_charge_gauge,
-            12: self._act_form_change
+            12: self._act_form_change,
+            13: self._act_cancel_right,
+            14: self._act_cancel_left
         }
 
         # Initialize pygame for manual physical controller override
@@ -142,6 +144,7 @@ class ClimaxHeroesEnv(gym.Env):
         return self._get_stacked_obs(), {}
 
     def step(self, action):
+        self.prev_action = getattr(self, 'last_action', 0)
         self.last_action = action
         self.round_steps += 1
         # 1. Execute action through virtual controller
@@ -484,6 +487,13 @@ class ClimaxHeroesEnv(gym.Env):
         if self.last_action in [9, 10]:
             reward -= 0.08
 
+        # Cancel penalty: Hiyori must only cancel during an attack string.
+        # If she cancels (Action 13 or 14) when the previous action was not an attack, penalize it!
+        if self.last_action in [13, 14]:
+            prev_action = getattr(self, 'prev_action', 0)
+            if prev_action not in [4, 5, 6, 7, 8]:
+                reward -= 0.15  # Naked cancel penalty in neutral
+
         # Form Change (L2) and Finisher (R2) attempt rewards when meter is full (prev_p1_rider >= 95.0)
         # We only reward the first attempt per round to prevent spamming/exploit loops!
         if self.prev_p1_rider >= 95.0:
@@ -622,3 +632,33 @@ class ClimaxHeroesEnv(gym.Env):
 
     def _act_form_change(self):
         self.gamepad.left_trigger(value=255)
+
+    def _act_cancel_right(self):
+        self._execute_cancel(vg.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_RIGHT)
+
+    def _act_cancel_left(self):
+        self._execute_cancel(vg.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_LEFT)
+
+    def _execute_cancel(self, dpad_btn):
+        if self.gamepad is None:
+            return
+        
+        # Rapid double-tap direction to cancel the current attack animation
+        # 1. Press direction
+        self.gamepad.press_button(button=dpad_btn)
+        self.gamepad.update()
+        time.sleep(0.02)
+        
+        # 2. Release direction
+        self.gamepad.release_button(button=dpad_btn)
+        self.gamepad.update()
+        time.sleep(0.02)
+        
+        # 3. Press direction again
+        self.gamepad.press_button(button=dpad_btn)
+        self.gamepad.update()
+        time.sleep(0.02)
+        
+        # 4. Release direction
+        self.gamepad.release_button(button=dpad_btn)
+        self.gamepad.update()
