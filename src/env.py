@@ -233,6 +233,13 @@ class ClimaxHeroesEnv(gym.Env):
             while time.time() - start_wait < 30.0:
                 time.sleep(0.2)
                 raw_img = np.array(self.sct.grab(self.window_region))
+                
+                # Safety Escape: If the AI actually lost (Game Over screen) while we were waiting, exit immediately!
+                if self._is_survival_game_over(raw_img):
+                    print("[Env] Escape: Survival Game Over detected in transition loop!")
+                    self.need_rematch = True
+                    return stacked_obs, -100.0, True, False, {}
+                    
                 p1_hp, p2_hp = self._read_hps(raw_img)
                 if p1_hp > 250.0 and p2_hp > 250.0:
                     print(f"[Env] Next map loaded! Resuming gameplay after {time.time() - start_wait:.2f}s.")
@@ -501,17 +508,21 @@ class ClimaxHeroesEnv(gym.Env):
         h, w, _ = img.shape
         hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
         
+        # Crop the upper sky region of the screen (y = 10% to 45%) where the artificial green backdrop boxes live.
+        # This completely filters out natural green trees and grass on the ground (e.g. on River Sunset stages).
+        sky_hsv = hsv[int(h * 0.10):int(h * 0.45), :]
+        
         # Green backdrop boxes (Hue: 35-85, Sat: 100-255, Val: 100-255)
         lower_green = np.array([35, 100, 100])
         upper_green = np.array([85, 255, 255])
-        mask_green = cv2.inRange(hsv, lower_green, upper_green)
+        mask_green = cv2.inRange(sky_hsv, lower_green, upper_green)
         
         # Orange/red background canvas (Hue: 10-30, Sat: 100-255, Val: 100-255)
         lower_orange = np.array([10, 100, 100])
         upper_orange = np.array([30, 255, 255])
         mask_orange = cv2.inRange(hsv, lower_orange, upper_orange)
         
-        return np.sum(mask_green > 0) > 30000 and np.sum(mask_orange > 0) > 40000
+        return np.sum(mask_green > 0) > 20000 and np.sum(mask_orange > 0) > 40000
 
     def _is_now_loading_screen(self, img):
         h, w, _ = img.shape
