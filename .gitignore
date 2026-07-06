@@ -1,0 +1,30 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environments
+.venv/
+venv/
+ENV/
+
+# Model checkpoints & Logs
+checkpoints/
+tb_logs/
+*.zip
+ppo_cartpole_test/
+ppo_cartpole_test.zip
+
+# IDEs and editors
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
+
+# OS files
+Thumbs.db
+db.db
+.DS_Store
