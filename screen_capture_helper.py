@@ -4,7 +4,7 @@ import cv2
 import numpy as np
 import time
 
-def find_game_window(window_title_keyword="PCSX2"):
+def find_game_window(window_title_keyword="仮面ライダー"):
     print(f"Searching for windows containing '{window_title_keyword}'...")
     windows = gw.getWindowsWithTitle(window_title_keyword)
     if not windows:
@@ -24,7 +24,7 @@ def find_game_window(window_title_keyword="PCSX2"):
             if t: print(f" - {t}")
         return None
 
-def test_capture(window_title_keyword="PCSX2", output_filename="game_capture_test.png"):
+def test_capture(window_title_keyword="仮面ライダー", output_filename="game_capture_test.png"):
     win = find_game_window(window_title_keyword)
     if not win:
         print("Could not capture: Game window not found. Make sure the emulator is running and visible.")
@@ -75,5 +75,13 @@ if __name__ == "__main__":
         subprocess.run(["pip", "install", "pygetwindow", "pyrect"])
         
     # Run test
-    # Change keyword to "Dolphin" if running SCH on Dolphin later
-    test_capture("PCSX2")
+    keywords = ["仮面ライダー", "PCSX2", "Dolphin", "Climax Heroes"]
+    success = False
+    for kw in keywords:
+        print(f"Trying to find window with keyword: '{kw}'...")
+        if test_capture(kw):
+            success = True
+            break
+    if not success:
+        print("Failed to find any game window.")
+
