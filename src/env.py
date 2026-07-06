@@ -302,8 +302,8 @@ class ClimaxHeroesEnv(gym.Env):
         p1_crop = img[y1:y2, p1_x1:p1_x2]
         p2_crop = img[y1:y2, p2_x1:p2_x2]
         
-        return (self._estimate_metric(p1_crop, is_p1=True), 
-                self._estimate_metric(p2_crop, is_p1=False))
+        return (self._estimate_gauge_color(p1_crop), 
+                self._estimate_gauge_color(p2_crop))
 
     def _read_rider_gauges(self, img):
         h, w, _ = img.shape
@@ -314,23 +314,35 @@ class ClimaxHeroesEnv(gym.Env):
         p1_crop = img[y1:y2, p1_x1:p1_x2]
         p2_crop = img[y1:y2, p2_x1:p2_x2]
         
-        return (self._estimate_metric(p1_crop, is_p1=True), 
-                self._estimate_metric(p2_crop, is_p1=False))
+        return (self._estimate_gauge_color(p1_crop), 
+                self._estimate_gauge_color(p2_crop))
 
-    def _estimate_metric(self, crop, is_p1=True):
+    def _estimate_gauge_color(self, crop):
         if crop.size == 0:
             return 0.0
             
-        # Grayscale thresholding for general gauge brightness detection
-        gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
-        _, mask = cv2.threshold(gray, 100, 255, cv2.THRESH_BINARY)
-            
-        # Count total columns containing active pixels
-        col_has_active = np.any(mask > 0, axis=0)
-        active_cols = np.sum(col_has_active)
-        cols = len(col_has_active)
+        # Strip vertical margins to avoid HUD borders or screen capture marking outlines
+        h_crop = crop.shape[0]
+        margin = max(1, min(3, int(h_crop * 0.15)))
+        crop_stripped = crop[margin:-margin, :]
         
-        max_active_fraction = 0.96
+        if crop_stripped.size == 0:
+            return 0.0
+            
+        hsv = cv2.cvtColor(crop_stripped, cv2.COLOR_BGR2HSV)
+        
+        # Saturation-based threshold (captures highly saturated colors: Red, Blue, Green, Yellow, etc.)
+        # and filters out metallic gray/silver casing and black/white boundaries.
+        lower_color = np.array([0, 100, 100])
+        upper_color = np.array([180, 255, 255])
+        mask = cv2.inRange(hsv, lower_color, upper_color)
+            
+        col_has_pixels = np.any(mask > 0, axis=0)
+        active_cols = np.sum(col_has_pixels)
+        cols = len(col_has_pixels)
+        
+        # Guard/Rider bars fill about 90% of their crop bounding boxes when full
+        max_active_fraction = 0.90
         pct = (active_cols / (cols * max_active_fraction)) * 100.0
         return min(100.0, pct)
 
