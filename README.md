@@ -92,7 +92,7 @@ Then navigate to `http://localhost:6006` in your browser.
 ## State Extraction & Environment Specs
 
 *   **Observation Space:** 4 stacked $84 \times 84$ grayscale frames (representing the last 4 frames at 30fps).
-*   **Action Space:** 15 discrete macro actions:
+*   **Action Space:** 19 discrete macro actions:
     *   `0`: Idle / Guard (Blocks attacks)
     *   `1`: Walk Forward
     *   `2`: Walk Backward
@@ -108,6 +108,10 @@ Then navigate to `http://localhost:6006` in your browser.
     *   `12`: Form Change (Xbox `LT` / 5 bars of meter)
     *   `13`: Attack Cancel Right (D-pad Double-tap Right / Cancel animation facing Right)
     *   `14`: Attack Cancel Left (D-pad Double-tap Left / Cancel animation facing Left)
+    *   `15`: Running Light Attack Right (D-pad double-tap Right + hold + Weak Attack)
+    *   `16`: Running Light Attack Left (D-pad double-tap Left + hold + Weak Attack)
+    *   `17`: Running Heavy Attack Right (D-pad double-tap Right + hold + Heavy Attack)
+    *   `18`: Running Heavy Attack Left (D-pad double-tap Left + hold + Heavy Attack)
 *   **Continuous Episode Mode:** The environment is configured for continuous infinite-episode training (`terminated = False`, `truncated = False`). Resets are managed manually or through external emulation state resets, letting the AI train seamlessly across multiple matches.
 *   **Persistent Gamepad Lifecycle:** Rebuilt using a persistent virtual driver lifecycle. The virtual controller remains connected throughout the entire Python process, preventing emulators (PCSX2/Dolphin) from losing Port 1 gamepad mappings.
 *   **Multi-Gamepad Manual Takeover:** Scans all connected physical joysticks in real-time. Pressing any face button or D-pad direction immediately silences AI inputs for **4.0 seconds**, enabling seamless human takeover for manual positioning or resets.

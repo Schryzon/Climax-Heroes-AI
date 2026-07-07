@@ -32,8 +32,8 @@ class ClimaxHeroesEnv(gym.Env):
         super().__init__()
         self.debug = debug
         
-        # Action space: 15 discrete macro actions mapped to Xbox controller buttons
-        self.action_space = gym.spaces.Discrete(15)
+        # Action space: 19 discrete macro actions mapped to Xbox controller buttons
+        self.action_space = gym.spaces.Discrete(19)
         
         # Observation space: 4 stacked 84x84 grayscale frames
         self.observation_space = gym.spaces.Box(
@@ -80,7 +80,11 @@ class ClimaxHeroesEnv(gym.Env):
             11: self._act_charge_gauge,
             12: self._act_form_change,
             13: self._act_cancel_right,
-            14: self._act_cancel_left
+            14: self._act_cancel_left,
+            15: self._act_running_light_right,
+            16: self._act_running_light_left,
+            17: self._act_running_heavy_right,
+            18: self._act_running_heavy_left
         }
 
         # Initialize pygame for manual physical controller override
@@ -491,7 +495,7 @@ class ClimaxHeroesEnv(gym.Env):
         # If she cancels (Action 13 or 14) when the previous action was not an attack, penalize it!
         if self.last_action in [13, 14]:
             prev_action = getattr(self, 'prev_action', 0)
-            if prev_action not in [4, 5, 6, 7, 8]:
+            if prev_action not in [4, 5, 6, 7, 8, 15, 16, 17, 18]:
                 reward -= 0.15  # Naked cancel penalty in neutral
 
         # Form Change (L2) and Finisher (R2) attempt rewards when meter is full (prev_p1_rider >= 95.0)
@@ -661,4 +665,45 @@ class ClimaxHeroesEnv(gym.Env):
         
         # 4. Release direction
         self.gamepad.release_button(button=dpad_btn)
+        self.gamepad.update()
+
+    def _act_running_light_right(self):
+        self._execute_running_attack(vg.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_RIGHT, vg.XUSB_BUTTON.XUSB_GAMEPAD_X)
+
+    def _act_running_light_left(self):
+        self._execute_running_attack(vg.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_LEFT, vg.XUSB_BUTTON.XUSB_GAMEPAD_X)
+
+    def _act_running_heavy_right(self):
+        self._execute_running_attack(vg.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_RIGHT, vg.XUSB_BUTTON.XUSB_GAMEPAD_Y)
+
+    def _act_running_heavy_left(self):
+        self._execute_running_attack(vg.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_LEFT, vg.XUSB_BUTTON.XUSB_GAMEPAD_Y)
+
+    def _execute_running_attack(self, dpad_btn, attack_btn):
+        if self.gamepad is None:
+            return
+        
+        # 1. Tap direction
+        self.gamepad.press_button(button=dpad_btn)
+        self.gamepad.update()
+        time.sleep(0.02)
+        
+        # 2. Release direction
+        self.gamepad.release_button(button=dpad_btn)
+        self.gamepad.update()
+        time.sleep(0.02)
+        
+        # 3. Hold direction (running)
+        self.gamepad.press_button(button=dpad_btn)
+        self.gamepad.update()
+        time.sleep(0.35) # Run for 350ms to build momentum
+        
+        # 4. Press attack button while holding direction
+        self.gamepad.press_button(button=attack_btn)
+        self.gamepad.update()
+        time.sleep(0.03)
+        
+        # 5. Release all
+        self.gamepad.release_button(button=dpad_btn)
+        self.gamepad.release_button(button=attack_btn)
         self.gamepad.update()
