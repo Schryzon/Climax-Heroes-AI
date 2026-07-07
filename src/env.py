@@ -91,11 +91,15 @@ class ClimaxHeroesEnv(gym.Env):
         import pygame
         pygame.init()
         pygame.joystick.init()
-        self.override_joystick = None
-        if pygame.joystick.get_count() > 0:
-            self.override_joystick = pygame.joystick.Joystick(0)
-            self.override_joystick.init()
-            print(f"[Env] Detected physical joystick for manual override: {self.override_joystick.get_name()}")
+        self.joysticks = []
+        for i in range(pygame.joystick.get_count()):
+            try:
+                j = pygame.joystick.Joystick(i)
+                j.init()
+                self.joysticks.append(j)
+                print(f"[Env] Detected physical joystick for manual override: {j.get_name()}")
+            except Exception:
+                pass
         self.last_user_input_time = 0.0
         self.last_action = 0
         self.round_steps = 0
@@ -567,12 +571,20 @@ class ClimaxHeroesEnv(gym.Env):
         pygame.event.pump()
         user_active = False
         
-        for j_idx in range(pygame.joystick.get_count()):
-            try:
-                j = pygame.joystick.Joystick(j_idx)
-                if not j.get_init():
+        # Monitor hot-plugging without instantiating objects every frame
+        current_count = pygame.joystick.get_count()
+        if current_count != len(self.joysticks):
+            self.joysticks = []
+            for i in range(current_count):
+                try:
+                    j = pygame.joystick.Joystick(i)
                     j.init()
-                
+                    self.joysticks.append(j)
+                except Exception:
+                    pass
+        
+        for j in self.joysticks:
+            try:
                 # Check D-pad (hats)
                 for i in range(j.get_numhats()):
                     if j.get_hat(i) != (0, 0):
