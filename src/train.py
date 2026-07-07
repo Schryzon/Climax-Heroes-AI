@@ -2,11 +2,20 @@ import os
 import sys
 import torch
 from stable_baselines3 import PPO
-from stable_baselines3.common.callbacks import CheckpointCallback
+from stable_baselines3.common.callbacks import CheckpointCallback, CallbackList, BaseCallback
 
 # Add project root to path to resolve src directory imports
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from src.env import ClimaxHeroesEnv
+
+class CudaCacheCallback(BaseCallback):
+    def __init__(self, verbose=0):
+        super().__init__(verbose)
+    def _on_step(self) -> bool:
+        return True
+    def _on_rollout_end(self) -> None:
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
 def train():
     print("=" * 60)
@@ -33,6 +42,8 @@ def train():
         save_path="./checkpoints/",
         name_prefix="climax_ppo_model"
     )
+    cuda_callback = CudaCacheCallback()
+    callbacks = CallbackList([checkpoint_callback, cuda_callback])
     
     # Configure PPO hyperparameters or load existing checkpoints to resume training
     import glob
@@ -81,7 +92,7 @@ def train():
         # Start learning (1 Million steps = ~9 hours of continuous emulated play)
         model.learn(
             total_timesteps=1000000,
-            callback=checkpoint_callback,
+            callback=callbacks,
             progress_bar=True
         )
         print("\nTraining complete! Saving final model weights...")
