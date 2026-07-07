@@ -91,15 +91,70 @@ class ClimaxHeroesEnv(gym.Env):
         import pygame
         pygame.init()
         pygame.joystick.init()
-        self.joysticks = []
+        
+        detected_joysticks = []
         for i in range(pygame.joystick.get_count()):
             try:
                 j = pygame.joystick.Joystick(i)
                 j.init()
-                self.joysticks.append(j)
-                print(f"[Env] Detected physical joystick for manual override: {j.get_name()}")
+                detected_joysticks.append(j)
             except Exception:
                 pass
+                
+        # Dynamically identify the virtual controller to exclude it from manual takeover overrides
+        self.virtual_joystick_guid = None
+        self.virtual_joystick_name = None
+        if self.gamepad is not None and len(detected_joysticks) > 0:
+            # Press the START button on the virtual gamepad
+            self.gamepad.press_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_START)
+            self.gamepad.update()
+            time.sleep(0.1) # Wait for Windows XInput driver registration
+            pygame.event.pump()
+            
+            for j in detected_joysticks:
+                is_virtual = False
+                try:
+                    # Check button 7 (Xbox START button index)
+                    if j.get_numbuttons() > 7 and j.get_button(7):
+                        is_virtual = True
+                except Exception:
+                    pass
+                    
+                # Fallback: check if ANY button is pressed
+                if not is_virtual:
+                    try:
+                        for b in range(j.get_numbuttons()):
+                            if j.get_button(b):
+                                is_virtual = True
+                                break
+                    except Exception:
+                        pass
+                        
+                if is_virtual:
+                    try:
+                        self.virtual_joystick_guid = j.get_guid()
+                    except AttributeError:
+                        pass
+                    self.virtual_joystick_name = j.get_name()
+                    print(f"[Env] Identified virtual controller to exclude: {j.get_name()} (GUID: {self.virtual_joystick_guid})")
+                    break
+            
+            # Release the START button
+            self.gamepad.release_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_START)
+            self.gamepad.update()
+            
+        self.joysticks = []
+        for j in detected_joysticks:
+            # Exclude the virtual controller
+            try:
+                if self.virtual_joystick_guid and j.get_guid() == self.virtual_joystick_guid:
+                    continue
+                if self.virtual_joystick_name and j.get_name() == self.virtual_joystick_name and not self.virtual_joystick_guid:
+                    continue
+            except Exception:
+                pass
+            self.joysticks.append(j)
+            print(f"[Env] Detected physical joystick for manual override: {j.get_name()}")
         self.last_user_input_time = 0.0
         self.last_action = 0
         self.round_steps = 0
@@ -573,12 +628,19 @@ class ClimaxHeroesEnv(gym.Env):
         
         # Monitor hot-plugging without instantiating objects every frame
         current_count = pygame.joystick.get_count()
-        if current_count != len(self.joysticks):
+        # Account for the virtual controller if detected
+        expected_len = current_count - (1 if self.virtual_joystick_name or self.virtual_joystick_guid else 0)
+        if len(self.joysticks) != expected_len:
             self.joysticks = []
             for i in range(current_count):
                 try:
                     j = pygame.joystick.Joystick(i)
                     j.init()
+                    # Filter out the virtual controller
+                    if self.virtual_joystick_guid and j.get_guid() == self.virtual_joystick_guid:
+                        continue
+                    if self.virtual_joystick_name and j.get_name() == self.virtual_joystick_name and not self.virtual_joystick_guid:
+                        continue
                     self.joysticks.append(j)
                 except Exception:
                     pass
