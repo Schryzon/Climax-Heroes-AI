@@ -4,12 +4,12 @@ import os
 
 # Add project root to path to resolve src directory
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from src.env import ClimaxHeroesEnv
+from src.env import Climax_Heroes_Env
 
 def test_custom_env():
-    print("Initializing ClimaxHeroesEnv (this will auto-detect the game window)...")
+    print("Initializing Climax_Heroes_Env (this will auto-detect the game window)...")
     try:
-        env = ClimaxHeroesEnv(debug=True)
+        env = Climax_Heroes_Env(debug=True)
     except Exception as e:
         print(f"Failed to initialize environment: {e}")
         sys.exit(1)
@@ -25,19 +25,19 @@ def test_custom_env():
     print("-" * 90)
     
     for i in range(100):
-        # Sample a random action (0 to 11)
+        # Sample a random action (0 to 18)
         action = env.action_space.sample()
         
         # Step the environment
         obs, reward, terminated, truncated, info = env.step(action)
         
         # Print state metrics
-        p1_hp = env.prev_p1_hp
-        p2_hp = env.prev_p2_hp
-        p1_guard = env.prev_p1_guard
-        p2_guard = env.prev_p2_guard
-        p1_rider = env.prev_p1_rider
-        p2_rider = env.prev_p2_rider
+        p1_hp = env.reward_calculator.prev_p1_hp
+        p2_hp = env.reward_calculator.prev_p2_hp
+        p1_guard = env.reward_calculator.prev_p1_guard
+        p2_guard = env.reward_calculator.prev_p2_guard
+        p1_rider = env.reward_calculator.prev_p1_rider
+        p2_rider = env.reward_calculator.prev_p2_rider
         
         print(f"{i:<6} | {p1_hp:<15.1f} | {p2_hp:<15.1f} | {p1_guard:<8.1f} | {p2_guard:<8.1f} | {p1_rider:<8.1f} | {p2_rider:<8.1f} | {reward:<6.2f}")
         

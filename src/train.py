@@ -6,9 +6,9 @@ from stable_baselines3.common.callbacks import CheckpointCallback, CallbackList,
 
 # Add project root to path to resolve src directory imports
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from src.env import ClimaxHeroesEnv
+from src.env import Climax_Heroes_Env
 
-class CudaCacheCallback(BaseCallback):
+class Cuda_Cache_Callback(BaseCallback):
     def __init__(self, verbose=0):
         super().__init__(verbose)
     def _on_step(self) -> bool:
@@ -34,7 +34,7 @@ def train():
 
     # Initialize custom environment (auto-detects emulated game window)
     print("Initializing environment...")
-    env = ClimaxHeroesEnv(debug=True)
+    env = Climax_Heroes_Env(debug=True)
     
     # Configure Checkpoint Callback to save weights periodically (every ~38 mins of play)
     checkpoint_callback = CheckpointCallback(
@@ -42,7 +42,7 @@ def train():
         save_path="./checkpoints/",
         name_prefix="climax_ppo_model"
     )
-    cuda_callback = CudaCacheCallback()
+    cuda_callback = Cuda_Cache_Callback()
     callbacks = CallbackList([checkpoint_callback, cuda_callback])
     
     # Configure PPO hyperparameters or load existing checkpoints to resume training
@@ -57,7 +57,7 @@ def train():
         print(f"Found existing saved model weights: {latest_save}")
         print("Resuming training from loaded weights...")
         try:
-            model = PPO.load(latest_save, env=env, device=device)
+            model = PPO.load(latest_save, env=env, device=device, custom_objects={"learning_rate": 1.5e-4, "target_kl": 0.025})
             is_resumed = True
         except Exception as e:
             print(f"Warning: Failed to load saved weights ({e}).")
@@ -69,7 +69,7 @@ def train():
         model = PPO(
             "CnnPolicy",
             env,
-            learning_rate=2.5e-4,
+            learning_rate=1.5e-4,
             n_steps=512,
             batch_size=128,
             n_epochs=4,
@@ -79,6 +79,7 @@ def train():
             ent_coef=0.08,
             vf_coef=0.5,
             max_grad_norm=0.5,
+            target_kl=0.025,
             verbose=1,
             tensorboard_log="./tb_logs/",
             device=device

@@ -1,0 +1,123 @@
+from src.actions import Climax_Action
+
+class Reward_Calculator:
+    def __init__(self, debug=False):
+        self.debug = debug
+        self.reset()
+        
+    def reset(self):
+        self.prev_p1_hp = 300.0
+        self.prev_p2_hp = 300.0
+        self.prev_p1_guard = 100.0
+        self.prev_p2_guard = 100.0
+        self.prev_p1_rider = 0.0
+        self.prev_p2_rider = 0.0
+        self.prev_combo_count = 0
+        self.p1_form_changed = False
+        self.p1_finisher_attempted = False
+        
+    def calculate_reward(self, p1_hp, p2_hp, p1_guard, p2_guard, p1_rider, p2_rider, combo_count, p1_rounds, p2_rounds, is_infinite, last_action, prev_action, round_steps):
+        # 1. HP damage dealt (to P2) vs taken (by P1)
+        damage_dealt = max(0.0, self.prev_p2_hp - p2_hp)
+        damage_taken = max(0.0, self.prev_p1_hp - p1_hp)
+        
+        # Supercharge damage dealt rewards
+        if damage_dealt > 0:
+            if last_action == Climax_Action.RIDER_FINALE:
+                damage_dealt_reward = (damage_dealt * 1.5) + 8.0  # Finisher hit payoff (scaled down from 3x + 25)
+            elif p2_guard == 0.0:
+                damage_dealt_reward = damage_dealt * 1.2  # No Mercy: slight boost for hitting guard-broken state
+            else:
+                damage_dealt_reward = damage_dealt * 1.0
+        else:
+            damage_dealt_reward = 0.0
+            
+        reward = damage_dealt_reward - (damage_taken * 1.2)
+        
+        # 2. Guard Gauge change (shield management)
+        guard_dealt = max(0.0, self.prev_p2_guard - p2_guard)
+        reward += guard_dealt * 0.1
+        
+        # Guard Crush bonus
+        if p2_guard == 0.0 and self.prev_p2_guard > 0.0:
+            reward += 5.0
+        
+        # AI's guard gauge reduction
+        guard_taken = max(0.0, self.prev_p1_guard - p1_guard)
+        if guard_taken > 0:
+            if damage_taken > 0:
+                reward -= guard_taken * 0.05  # Failed block / hit
+            else:
+                reward += guard_taken * 0.05  # Successful block
+                
+        # Guard Crush penalty
+        if p1_guard == 0.0 and self.prev_p1_guard > 0.0:
+            reward -= 5.0
+                
+        # 3. Rider Gauge change & Potential
+        rider_gained = max(0.0, p1_rider - self.prev_p1_rider)
+        reward += rider_gained * 0.30  # Encourage active charging
+        
+        # Minor dodge action cost to prevent infinite evasion spam
+        if last_action in [Climax_Action.EVADE_LEFT, Climax_Action.EVADE_RIGHT]:
+            reward -= 0.08
+
+        # Cancel penalty: Hiyori must only cancel during an attack string
+        if last_action in [Climax_Action.CANCEL_RIGHT, Climax_Action.CANCEL_LEFT]:
+            if prev_action not in [
+                Climax_Action.LIGHT, Climax_Action.HEAVY, Climax_Action.SPECIAL, 
+                Climax_Action.NORMAL_FINISHER, Climax_Action.RIDER_FINALE,
+                Climax_Action.RUNNING_LIGHT_RIGHT, Climax_Action.RUNNING_LIGHT_LEFT,
+                Climax_Action.RUNNING_HEAVY_RIGHT, Climax_Action.RUNNING_HEAVY_LEFT
+            ]:
+                reward -= 0.15  # Naked cancel penalty in neutral
+
+        # Form Change (L2) and Finisher (R2) attempt rewards when meter is full
+        if self.prev_p1_rider >= 95.0:
+            if last_action == Climax_Action.FORM_CHANGE and not self.p1_form_changed:
+                reward += 5.0
+                self.p1_form_changed = True
+                if self.debug:
+                    print("[Reward] First Form Change triggered! +5.0 bonus.")
+            elif last_action == Climax_Action.RIDER_FINALE and not self.p1_finisher_attempted:
+                reward += 5.0
+                self.p1_finisher_attempted = True
+                if self.debug:
+                    print("[Reward] First Rider Finale triggered! +5.0 bonus.")
+        
+        # 4. Combo bonus
+        if combo_count > 0:
+            reward += combo_count * 0.1
+            
+        # Milestone combo bonus for hitting 10+ combo sequence (only rewarded once per sequence)
+        if combo_count >= 10 and self.prev_combo_count < 10:
+            reward += 5.0
+            if self.debug:
+                print(f"[Reward] Milestone Combo reached! {combo_count} hits! +5.0 bonus.")
+            
+        # 5. Desperation Mode (only active when timer is finite)
+        if not is_infinite:
+            time_left = max(0.0, 99.0 - (round_steps / 30.0))
+            if time_left < 20.0 and p1_hp < p2_hp:
+                # Double all damage dealt rewards in desperation phase
+                if damage_dealt > 0:
+                    reward += damage_dealt_reward * 1.0
+                
+                hp_deficit = p2_hp - p1_hp
+                deficit_penalty = hp_deficit * 0.05
+                
+                if p2_rounds > p1_rounds:
+                      deficit_penalty *= 2.0
+                      
+                reward -= deficit_penalty
+            
+        # Update HP and Gauge memory
+        self.prev_p1_hp = p1_hp
+        self.prev_p2_hp = p2_hp
+        self.prev_p1_guard = p1_guard
+        self.prev_p2_guard = p2_guard
+        self.prev_p1_rider = p1_rider
+        self.prev_p2_rider = p2_rider
+        self.prev_combo_count = combo_count
+        
+        return reward
