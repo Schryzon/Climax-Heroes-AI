@@ -92,7 +92,7 @@ def train():
     
     try:
         # Start learning (1 Million steps = ~9 hours of continuous emulated play)
-         model.learn(
+        model.learn(
             total_timesteps=1000000,
             callback=callbacks,
             progress_bar=True,
