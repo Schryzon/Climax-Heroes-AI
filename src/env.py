@@ -148,6 +148,30 @@ class ClimaxHeroesEnv(gym.Env):
         return self._get_stacked_obs(), {}
 
     def step(self, action):
+        # Check for manual joystick override takeover
+        self._check_user_takeover()
+        
+        # If user pressed a button within the last 4.0 seconds, silence AI and freeze training steps
+        if time.time() - self.last_user_input_time < 4.0:
+            self._release_all()
+            if self.debug:
+                print("[Takeover] Manual override active. Silencing AI and pausing PPO steps...")
+                
+            # Block training loop execution until 4.0 seconds of user inactivity
+            while time.time() - self.last_user_input_time < 4.0:
+                time.sleep(0.1)
+                self._check_user_takeover()
+                
+            if self.debug:
+                print("[Takeover] User inactive. Rebuilding visual frame stack and resuming PPO steps...")
+                
+            # Grab a fresh frame after resuming to clear stale visual history
+            raw_img = np.array(self.sct.grab(self.window_region))
+            gray = cv2.cvtColor(raw_img, cv2.COLOR_BGRA2GRAY)
+            obs_frame = cv2.resize(gray, (84, 84))
+            for _ in range(4):
+                self.frame_stack.append(obs_frame)
+
         self.prev_action = getattr(self, 'last_action', 0)
         self.last_action = action
         self.round_steps += 1
@@ -538,10 +562,7 @@ class ClimaxHeroesEnv(gym.Env):
         return reward
 
     # --- Virtual Controller Action Implementations ---
-    def _send_action(self, action):
-        if self.gamepad is None:
-            return
-         # Check for physical gamepad override input across all connected controllers
+    def _check_user_takeover(self):
         import pygame
         pygame.event.pump()
         user_active = False
@@ -568,12 +589,10 @@ class ClimaxHeroesEnv(gym.Env):
                 pass
                 
         if user_active:
-            # User is actively pressing buttons or moving sticks
             self.last_user_input_time = time.time()
-            
-        # If user pressed a button within the last 4.0 seconds, silence AI inputs
-        if time.time() - self.last_user_input_time < 4.0:
-            self._release_all()
+
+    def _send_action(self, action):
+        if self.gamepad is None:
             return
         
         # Reset buttons to neutral first, then press the chosen macro action
