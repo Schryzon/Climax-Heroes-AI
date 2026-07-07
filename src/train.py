@@ -27,9 +27,9 @@ def train():
     print("Initializing environment...")
     env = ClimaxHeroesEnv(debug=True)
     
-    # Configure Checkpoint Callback to save weights periodically (every ~8 mins of play)
+    # Configure Checkpoint Callback to save weights periodically (every ~38 mins of play)
     checkpoint_callback = CheckpointCallback(
-        save_freq=10000,
+        save_freq=30000,
         save_path="./checkpoints/",
         name_prefix="climax_ppo_model"
     )
