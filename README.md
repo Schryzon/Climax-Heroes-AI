@@ -22,12 +22,12 @@ A Reinforcement Learning environment wrapper designed to train **Hiyori**, a cus
 ```
 Climax-Heroes-AI/
 ├── src/
-│   └── env.py                # Custom Gymnasium environment wrapper
+│   ├── env.py                # Gymnasium environment orchestrator (Climax_Heroes_Env)
+│   ├── actions.py            # Climax_Action enums and virtual gamepad driver (Gamepad_Executor)
+│   ├── hud.py                # OpenCV-based visual screen parsing (Hud_Parser)
+│   └── rewards.py            # Symmetrical reward formulations (Reward_Calculator)
 ├── tests/
 │   └── test_env.py           # Console dashboard test for real-time stats & rewards
-├── tools/
-│   ├── screen_capture_helper.py  # Visual HUD coordinate calibration helper
-│   └── test_gamepad.py       # Virtual gamepad initialization tester
 ├── requirements.txt          # Python dependencies
 └── README.md                 # Project documentation
 ```
@@ -92,26 +92,26 @@ Then navigate to `http://localhost:6006` in your browser.
 ## State Extraction & Environment Specs
 
 *   **Observation Space:** 4 stacked $84 \times 84$ grayscale frames (representing the last 4 frames at 30fps).
-*   **Action Space:** 19 discrete macro actions:
-    *   `0`: Idle / Guard (Blocks attacks)
-    *   `1`: Walk Forward
-    *   `2`: Walk Backward
-    *   `3`: Jump (D-pad Up)
-    *   `4`: Light Attack Combo (Xbox `X`)
-    *   `5`: Heavy Attack Combo (Xbox `Y`)
-    *   `6`: Special Move (Xbox `A` / 2 bars of meter)
-    *   `7`: Normal Finisher (Xbox `B`)
-    *   `8`: Rider Finale (Xbox `RT` / 5 bars of meter)
-    *   `9`: Evade Left (Xbox `LB`)
-    *   `10`: Evade Right (Xbox `RB`)
-    *   `11`: Charge Rider Gauge (D-pad Down)
-    *   `12`: Form Change (Xbox `LT` / 5 bars of meter)
-    *   `13`: Attack Cancel Right (D-pad Double-tap Right / Cancel animation facing Right)
-    *   `14`: Attack Cancel Left (D-pad Double-tap Left / Cancel animation facing Left)
-    *   `15`: Running Light Attack Right (D-pad double-tap Right + hold + Weak Attack)
-    *   `16`: Running Light Attack Left (D-pad double-tap Left + hold + Weak Attack)
-    *   `17`: Running Heavy Attack Right (D-pad double-tap Right + hold + Heavy Attack)
-    *   `18`: Running Heavy Attack Left (D-pad double-tap Left + hold + Heavy Attack)
+*   **Action Space:** 19 discrete macro actions mapped via `Climax_Action`:
+    *   `Climax_Action.IDLE` (`0`): Idle / Guard (Blocks attacks)
+    *   `Climax_Action.WALK_FWD` (`1`): Walk Forward
+    *   `Climax_Action.WALK_BACK` (`2`): Walk Backward
+    *   `Climax_Action.JUMP` (`3`): Jump (D-pad Up)
+    *   `Climax_Action.LIGHT` (`4`): Light Attack Combo (Xbox `X`)
+    *   `Climax_Action.HEAVY` (`5`): Heavy Attack Combo (Xbox `Y`)
+    *   `Climax_Action.SPECIAL` (`6`): Special Move (Xbox `A` / 2 bars of meter)
+    *   `Climax_Action.NORMAL_FINISHER` (`7`): Normal Finisher (Xbox `B`)
+    *   `Climax_Action.RIDER_FINALE` (`8`): Rider Finale (Xbox `RT` / 5 bars of meter)
+    *   `Climax_Action.EVADE_LEFT` (`9`): Evade Left (Xbox `LB`)
+    *   `Climax_Action.EVADE_RIGHT` (`10`): Evade Right (Xbox `RB`)
+    *   `Climax_Action.CHARGE_GAUGE` (`11`): Charge Rider Gauge (D-pad Down)
+    *   `Climax_Action.FORM_CHANGE` (`12`): Form Change (Xbox `LT` / 5 bars of meter)
+    *   `Climax_Action.CANCEL_RIGHT` (`13`): Attack Cancel Right (D-pad Double-tap Right / Cancel animation facing Right)
+    *   `Climax_Action.CANCEL_LEFT` (`14`): Attack Cancel Left (D-pad Double-tap Left / Cancel animation facing Left)
+    *   `Climax_Action.RUNNING_LIGHT_RIGHT` (`15`): Running Light Attack Right (D-pad double-tap Right + hold + Weak Attack)
+    *   `Climax_Action.RUNNING_LIGHT_LEFT` (`16`): Running Light Attack Left (D-pad double-tap Left + hold + Weak Attack)
+    *   `Climax_Action.RUNNING_HEAVY_RIGHT` (`17`): Running Heavy Attack Right (D-pad double-tap Right + hold + Heavy Attack)
+    *   `Climax_Action.RUNNING_HEAVY_LEFT` (`18`): Running Heavy Attack Left (D-pad double-tap Left + hold + Heavy Attack)
 *   **Continuous Episode Mode:** The environment is configured for continuous infinite-episode training (`terminated = False`, `truncated = False`). Resets are managed manually or through external emulation state resets, letting the AI train seamlessly across multiple matches.
 *   **Persistent Gamepad Lifecycle:** Rebuilt using a persistent virtual driver lifecycle. The virtual controller remains connected throughout the entire Python process, preventing emulators (PCSX2/Dolphin) from losing Port 1 gamepad mappings.
 *   **Multi-Gamepad Manual Takeover:** Scans all connected physical joysticks in real-time. Pressing any face button or D-pad direction immediately silences AI inputs for **4.0 seconds**, enabling seamless human takeover for manual positioning or resets.
@@ -122,23 +122,24 @@ To guide policy optimization and prevent reward hacking, the environment utilize
 
 1.  **HP Damage Trade-offs:**
     *   **Damage Dealt:** `+1.0` per point of HP damage dealt.
-    *   **Guard Broken Hit:** `+2.0` per point of HP damage dealt while the opponent is guard-broken.
-    *   **Finisher Hit Bonus:** `+3.0` per point of HP damage + a flat `+25.0` bonus for landing a Rider Finale (Action 8).
+    *   **Guard Broken Hit:** `+1.2` multiplier per point of HP damage dealt while the opponent is guard-broken.
+    *   **Finisher Hit Bonus:** `+1.5` multiplier + a flat `+8.0` bonus for landing a Rider Finale (Action 8).
     *   **Damage Taken:** `-1.2` per point of HP damage taken.
 
 2.  **Shield & Guard Management:**
-    *   **Shield Damage Dealt:** `+0.3` per point of opponent guard gauge reduction.
-    *   **Guard Crush Bonus:** `+15.0` bonus for completely breaking the opponent's shield.
-    *   **Successful Block:** `+0.20` per point of shield reduction if the AI blocks an attack without taking HP damage.
-    *   **Failed Block:** `-0.15` per point of shield reduction if the AI is hit.
-    *   **Guard Crush Penalty:** `-15.0` penalty if the AI's own shield is completely broken/crushed.
+    *   **Shield Damage Dealt:** `+0.1` per point of opponent guard gauge reduction.
+    *   **Guard Crush Bonus:** `+5.0` bonus for completely breaking the opponent's shield.
+    *   **Successful Block:** `+0.05` per point of shield reduction if the AI blocks an attack without taking HP damage.
+    *   **Failed Block:** `-0.05` per point of shield reduction if the AI is hit.
+    *   **Guard Crush Penalty:** `-5.0` penalty if the AI's own shield is completely broken/crushed.
 3.  **Special Meter (Rider Gauge):**
     *   **Meter Gained:** `+0.30` per unit of meter generated.
     *   **Form Change / Finisher Exploration:** `+5.0` one-time bonus for the first L2/R2 attempt when meter is full ($\ge 95.0$).
 4.  **Dodge Cost:**
     *   **Evade Penalty:** `-0.08` per dodge action (Action 9 & 10) to penalize infinite dodge-spamming, forcing the AI to balance defense with active combat.
-5.  **Combo Bonus:**
-    *   `+0.1` per combo hit count to encourage chaining attacks.
+5.  **Combo & Milestone Bonus:**
+    *   **Combo Hit:** `+0.1` per combo hit count to encourage chaining attacks.
+    *   **10+ Combo Milestone:** `+5.0` flat bonus when combo count reaches 10+ for the first time in a chain (encourages active cancel-loop execution).
 
 ### In-Game HUD Coordinate Mapping
 
