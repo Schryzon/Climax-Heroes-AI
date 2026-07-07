@@ -607,8 +607,14 @@ class ClimaxHeroesEnv(gym.Env):
         if self.gamepad is None:
             return
         
-        # Reset buttons to neutral first, then press the chosen macro action
-        self._release_all()
+        # Hold actions (Walk Forward, Walk Backward, Charge Gauge) do not release
+        # if the action is repeated consecutively, preventing stutters/charge cancels.
+        prev_act = getattr(self, 'prev_action', 0)
+        if action in [1, 2, 11] and prev_act == action:
+            pass
+        else:
+            self._release_all()
+            
         if self.gamepad is not None:
             self.ACTION_MAP[action]()
             self.gamepad.update()
