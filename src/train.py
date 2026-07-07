@@ -51,12 +51,14 @@ def train():
     save_files = [f for f in save_files if os.path.exists(f)]
     
     model = None
+    is_resumed = False
     if save_files:
         latest_save = max(save_files, key=os.path.getmtime)
         print(f"Found existing saved model weights: {latest_save}")
         print("Resuming training from loaded weights...")
         try:
             model = PPO.load(latest_save, env=env, device=device)
+            is_resumed = True
         except Exception as e:
             print(f"Warning: Failed to load saved weights ({e}).")
             print("Action space size or model shape may have changed. Fallback to initializing from scratch...")
@@ -90,10 +92,11 @@ def train():
     
     try:
         # Start learning (1 Million steps = ~9 hours of continuous emulated play)
-        model.learn(
+         model.learn(
             total_timesteps=1000000,
             callback=callbacks,
-            progress_bar=True
+            progress_bar=True,
+            reset_num_timesteps=not is_resumed
         )
         print("\nTraining complete! Saving final model weights...")
         model.save("climax_ppo_final")
