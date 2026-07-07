@@ -461,10 +461,7 @@ class ClimaxHeroesEnv(gym.Env):
             
         reward = damage_dealt_reward - (damage_taken * 1.2)
         
-        # Penalize missed/wasted finisher (action 8 executed but dealt 0 damage)
-        if damage_dealt == 0 and self.last_action == 8:
-            reward -= 15.0
-        
+
         # 2. Guard Gauge change (shield management: P1 is AI, P2 is Opponent)
         # Opponent's guard gauge reduction (we want to crush their shield - increased from 0.1 to 0.3 to reward heavy pressure)
         guard_dealt = max(0.0, self.prev_p2_guard - p2_guard)
@@ -482,6 +479,10 @@ class ClimaxHeroesEnv(gym.Env):
                 reward -= guard_taken * 0.15  # Failed block / hit
             else:
                 reward += guard_taken * 0.20  # Successful block (absorbed hit on shield!)
+                
+        # Guard Crush penalty (AI's own shield completely broken/crushed)
+        if p1_guard == 0.0 and self.prev_p1_guard > 0.0:
+            reward -= 15.0
                 
         # 3. Rider Gauge change & Potential (generating special meter is good for AI P1)
         rider_gained = max(0.0, p1_rider - self.prev_p1_rider)

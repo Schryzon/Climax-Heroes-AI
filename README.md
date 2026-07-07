@@ -125,12 +125,13 @@ To guide policy optimization and prevent reward hacking, the environment utilize
     *   **Guard Broken Hit:** `+2.0` per point of HP damage dealt while the opponent is guard-broken.
     *   **Finisher Hit Bonus:** `+3.0` per point of HP damage + a flat `+25.0` bonus for landing a Rider Finale (Action 8).
     *   **Damage Taken:** `-1.2` per point of HP damage taken.
-    *   **Missed Finisher Penalty:** `-15.0` penalty if a Rider Finale is attempted but deals `0` damage.
+
 2.  **Shield & Guard Management:**
     *   **Shield Damage Dealt:** `+0.3` per point of opponent guard gauge reduction.
     *   **Guard Crush Bonus:** `+15.0` bonus for completely breaking the opponent's shield.
     *   **Successful Block:** `+0.20` per point of shield reduction if the AI blocks an attack without taking HP damage.
     *   **Failed Block:** `-0.15` per point of shield reduction if the AI is hit.
+    *   **Guard Crush Penalty:** `-15.0` penalty if the AI's own shield is completely broken/crushed.
 3.  **Special Meter (Rider Gauge):**
     *   **Meter Gained:** `+0.30` per unit of meter generated.
     *   **Form Change / Finisher Exploration:** `+5.0` one-time bonus for the first L2/R2 attempt when meter is full ($\ge 95.0$).
