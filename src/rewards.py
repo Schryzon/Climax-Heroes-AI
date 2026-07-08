@@ -17,6 +17,8 @@ class Reward_Calculator:
         self.p1_finisher_attempted = False
         self.special_active_steps = 0
         self.special_hit_detected = False
+        self.kick_active_steps = 0
+        self.kick_hit_detected = False
         
     def calculate_reward(self, p1_hp, p2_hp, p1_guard, p2_guard, p1_rider, p2_rider, combo_count, p1_rounds, p2_rounds, is_infinite, last_action, prev_action, round_steps, opponent_finisher_connected=False):
         # 1. HP damage dealt (to P2) vs taken (by P1)
@@ -99,6 +101,21 @@ class Reward_Calculator:
                 if self.debug:
                     print("[Reward] Special move failed to hit (whiff/block)! -2.5 penalty.")
 
+        # Track Rider Kick (D-pad Up + Circle / Xbox B) hit success window
+        if last_action == Climax_Action.RIDER_KICK:
+            if self.kick_active_steps == 0:
+                self.kick_active_steps = 45  # 1.5 second window at 30fps
+                self.kick_hit_detected = False
+                
+        if self.kick_active_steps > 0:
+            self.kick_active_steps -= 1
+            if damage_dealt > 0:
+                self.kick_hit_detected = True
+            if self.kick_active_steps == 0 and not self.kick_hit_detected:
+                reward -= 3.0
+                if self.debug:
+                    print("[Reward] Rider Kick failed to hit (whiff/block)! -3.0 penalty.")
+
         # Punish getting hit by opponent's Rider Finale (finisher)
         if opponent_finisher_connected:
             reward -= 30.0
@@ -126,11 +143,13 @@ class Reward_Calculator:
             if self.debug:
                 print(f"[Reward] Milestone Combo reached! {combo_count} hits! +5.0 bonus.")
             
-        # 5. Desperation Mode (only active when timer is finite)
+        # 5. Red Shoes System (forced berserk combat fail-safe when trailing in HP near round end)
+        # Inspired by the Kabuto Zecter's secret berserk program. As Hiyori is half-Worm, 
+        # this system turns the agent into a relentless attacker to survive.
         if not is_infinite:
             time_left = max(0.0, 99.0 - (round_steps / 30.0))
             if time_left < 20.0 and p1_hp < p2_hp:
-                # Double all damage dealt rewards in desperation phase
+                # Double all damage dealt rewards (berserk mode)
                 if damage_dealt > 0:
                     reward += damage_dealt_reward * 1.0
                 

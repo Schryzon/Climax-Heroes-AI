@@ -262,7 +262,7 @@ class Climax_Heroes_Env(gym.Env):
         p1_hp, p2_hp = self.hud_parser.read_hps(bgr_full)
         
         # Detect round/match reset (both players restored to full HP from a damaged/dead state)
-        # to ensure round_steps is kept accurate for desperation mode calculation
+        # to ensure round_steps is kept accurate for Red Shoes System calculation
         if (p1_hp >= 298.0 and p2_hp >= 298.0 and 
             (self.reward_calculator.prev_p1_hp < 290.0 or self.reward_calculator.prev_p2_hp < 290.0)):
             if self.debug:

@@ -225,8 +225,15 @@ We use a dense reward framework in [rewards.py](src/rewards.py) to avoid reward-
     *   **Safely Charging:** `+0.30` per unit of meter generated.
     *   **Hit While Charging:** `-15.0` penalty if Hiyori is hit while charging (forces her to back away and create distance before building meter).
     *   **Special Move Whiff Tracking:** When Hiyori uses a Special Attack (A / Cross), a **30-step (1.0 second)** evaluation window starts. If the window closes without dealing damage (whiffed, blocked, or dodged), she receives a **`-2.5` penalty**.
+    *   **Rider Kick Whiff Tracking:** When Hiyori executes a Rider Kick (D-pad Up + Xbox `B`), a **45-step (1.5 second)** evaluation window starts. If it whiffs or gets blocked, she receives a **`-3.0` penalty**.
     *   **Opponent Finisher Hit:** `-30.0` penalty if Hiyori is hit by the opponent's Rider Finale (punishes her for failing to defend against major ultimates).
     *   **Form Change / Finisher Use:** `+5.0` bonus every time she uses `FORM_CHANGE` or `RIDER_FINALE` while the meter is full.
+4.  **Red Shoes System (Thematic Berserk Protocol):**
+    *   Only active when the match timer is finite.
+    *   If the time remaining drops below **20 seconds** AND Hiyori (P1) is trailing in HP (`p1_hp < p2_hp`), the forced-combat **Red Shoes System** triggers (a reference to the secret berserk protocol in Kabuto/Gatack's Zecters).
+    *   While active:
+        *   **Berserk Offense:** All damage dealt rewards are doubled (`damage_dealt_reward * 2.0`), transforming Hiyori into an unstoppable attacker to ensure survival.
+        *   **Deficit Pressure:** Hiyori receives a step penalty based on her HP deficit (`(p2_hp - p1_hp) * 0.05`). This penalty is **doubled** if she is also trailing in round wins, forcing her to relentlessly chase and finish the target.
 
 ---
 
