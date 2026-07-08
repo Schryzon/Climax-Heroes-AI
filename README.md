@@ -104,15 +104,21 @@ python312 .\tools\screen_capture_helper.py
 This saves `game_capture_annotated.png` in the root folder. Open it to check if health bars, shields, and gauges are correctly boxed.
 
 ### Step 3: Run Console Verification
-Run the custom environment with random actions to inspect the real-time CLI dashboard (shows HP levels, shield values, meter changes, and step logs):
+Run the custom environment with random actions to inspect the real-time CLI dashboard (shows HP levels, shield values, meter changes, and step logs). Though, ensure a match is currently running and the window is focused on PCSX2:
 ```powershell
 python312 .\tests\test_env.py
 ```
 
 ### Step 4: Train Hiyori
 To train the PPO model against the PCSX2 CPU player:
-1. In PCSX2, select **Vs Mode**. Configure P1 as a human player (which the AI drives) and P2 as a CPU.
-2. Start the training script:
+1. In PCSX2, boot up Kamen Rider Climax Heroes and enter **Training Mode**.
+2. Select **Decade** or **Dark Decade** with Blade's Form Change (recommended) for P1 (Hiyori).
+3. Select **Blade** (recommended) for P2 (Opponent).
+4. Go to training settings and configure:
+   * Toggle CPU level to **2 stars** (Normal difficulty).
+   * Toggle **off HP regeneration** (HP Regen: Off).
+   * Toggle **off gauge regeneration** (Gauge Regen: Off).
+5. Start the training script:
    ```powershell
    python312 .\src\train.py
    ```
@@ -125,11 +131,14 @@ The training script **automatically spawns a background TensorBoard server** at 
 
 ### Step 6: Run the Evaluation Arena
 Test Hiyori's skills using the interactive [evaluate.py](src/evaluate.py) script:
-```powershell
-python312 .\src\evaluate.py
-```
+1. Ensure **two physical/virtual controllers are plugged in/mapped** in PCSX2 settings (the game will not allow 2-Player VS Mode if only one gamepad is detected).
+2. Start the game in **VS Mode** (2-Player match).
+3. **Start the battle first** (so the fighters are on screen), then run the evaluation script:
+   ```powershell
+   python312 .\src\evaluate.py
+   ```
 This opens an interactive menu supporting:
-1.  **Hiyori vs CPU** (AI P1 vs CPU P2) [Default]
+1.  **Hiyori vs CPU** (AI P1 vs CPU P2) [Default] *(No need for two controllers)*
 2.  **Hiyori vs Hiyori** (AI P1 vs AI P2 - spawns a second virtual controller for Port 2)
 3.  **Hiyori vs Me** (AI P1 vs Human P2 - lets you fight Hiyori directly with your own physical controller)
 *Simply press `Enter` to load your latest progress and fight the CPU!*
