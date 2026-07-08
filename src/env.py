@@ -7,6 +7,7 @@ import mss
 import pygetwindow as gw
 from collections import deque
 import pygame
+import gc
 
 # Optional import for virtual controller
 try:
@@ -22,12 +23,13 @@ from src.rewards import Reward_Calculator
 class Climax_Heroes_Env(gym.Env):
     metadata = {"render_modes": ["human"]}
 
-    def __init__(self, window_region=None, debug=False):
+    def __init__(self, window_region=None, debug=False, enable_takeover=True):
         super().__init__()
         self.debug = debug
+        self.enable_takeover = enable_takeover
         
-        # Action space: 19 discrete actions mapped via Climax_Action enum
-        self.action_space = gym.spaces.Discrete(19)
+        # Action space: 32 discrete actions mapped via Climax_Action enum
+        self.action_space = gym.spaces.Discrete(32)
         
         # Observation space: 4 stacked 84x84 grayscale frames
         self.observation_space = gym.spaces.Box(
@@ -115,6 +117,8 @@ class Climax_Heroes_Env(gym.Env):
         self.joysticks = []
         self.physical_joy_ids = set()
         self._rebuild_joysticks()
+        # Flush the initial startup connection events to prevent redundant rebuild logs in the first steps
+        pygame.event.clear()
 
         self.last_user_input_time = 0.0
         self.last_action = Climax_Action.IDLE
@@ -154,6 +158,14 @@ class Climax_Heroes_Env(gym.Env):
             except Exception:
                 pass
             self.joysticks.append(j)
+            try:
+                self.physical_joy_ids.add(j.get_instance_id())
+            except AttributeError:
+                pass
+            try:
+                self.physical_joy_ids.add(j.get_id())
+            except AttributeError:
+                pass
             self.physical_joy_ids.add(i)
             print(f"[Env] Registered physical joystick for manual override: {j.get_name()} (ID: {i})")
 
@@ -200,28 +212,29 @@ class Climax_Heroes_Env(gym.Env):
         action = Climax_Action(action_idx)
         
         # Check for manual joystick override takeover
-        self._check_user_takeover()
-        
-        # If user pressed a button within the last 4.0 seconds, silence AI and freeze training steps
-        if time.time() - self.last_user_input_time < 4.0:
-            self.gamepad_executor.release_all()
-            if self.debug:
-                print("[Takeover] Manual override active. Silencing AI and pausing PPO steps...")
-                
-            # Block training loop execution until 4.0 seconds of user inactivity
-            while time.time() - self.last_user_input_time < 4.0:
-                time.sleep(0.1)
-                self._check_user_takeover()
-                
-            if self.debug:
-                print("[Takeover] User inactive. Rebuilding visual frame stack and resuming PPO steps...")
-                
-            # Grab a fresh frame after resuming to clear stale visual history
-            raw_img = np.array(self.sct.grab(self.window_region))
-            gray = cv2.cvtColor(raw_img, cv2.COLOR_BGRA2GRAY)
-            obs_frame = cv2.resize(gray, (84, 84))
-            for _ in range(4):
-                self.frame_stack.append(obs_frame)
+        if self.enable_takeover:
+            self._check_user_takeover()
+            
+            # If user pressed a button within the last 4.0 seconds, silence AI and freeze training steps
+            if time.time() - self.last_user_input_time < 4.0:
+                self.gamepad_executor.release_all()
+                if self.debug:
+                    print("[Takeover] Manual override active. Silencing AI and pausing PPO steps...")
+                    
+                # Block training loop execution until 4.0 seconds of user inactivity
+                while time.time() - self.last_user_input_time < 4.0:
+                    time.sleep(0.1)
+                    self._check_user_takeover()
+                    
+                if self.debug:
+                    print("[Takeover] User inactive. Rebuilding visual frame stack and resuming PPO steps...")
+                    
+                # Grab a fresh frame after resuming to clear stale visual history
+                raw_img = np.array(self.sct.grab(self.window_region))
+                gray = cv2.cvtColor(raw_img, cv2.COLOR_BGRA2GRAY)
+                obs_frame = cv2.resize(gray, (84, 84))
+                for _ in range(4):
+                    self.frame_stack.append(obs_frame)
 
         self.prev_action = self.last_action
         self.last_action = action
@@ -242,66 +255,94 @@ class Climax_Heroes_Env(gym.Env):
         self.frame_stack.append(obs_frame)
         stacked_obs = self._get_stacked_obs()
         
-        # Convert captured screen to HSV once (single-pass conversion)
-        hsv_full = cv2.cvtColor(raw_img, cv2.COLOR_BGRA2HSV)
+        # Extract BGR frame for HUD parsing (takes views, zero-copy)
+        bgr_full = raw_img[:, :, :3]
         
         # 4. Extract rewards and check round status
-        p1_hp, p2_hp = self.hud_parser.read_hps(hsv_full)
-        p1_guard, p2_guard = self.hud_parser.read_guard_gauges(hsv_full)
-        p1_rider, p2_rider = self.hud_parser.read_rider_gauges(hsv_full)
-        combo_count = self.hud_parser.read_combo_count(hsv_full)
-        p1_rounds, p2_rounds = self.hud_parser.read_rounds_won(hsv_full)
-        is_infinite = self.hud_parser.is_timer_infinite(hsv_full)
+        p1_hp, p2_hp = self.hud_parser.read_hps(bgr_full)
         
-        # Check if a Rider Finale successfully connected and initiated a cinematic cutscene.
-        # If Action 8 was executed and the Rider Gauge was consumed (from >= 95 to < 10),
-        # we pause training dynamically until the cinematic cutscene finishes and the HUD reappears.
-        if action == Climax_Action.RIDER_FINALE or self.prev_action == Climax_Action.RIDER_FINALE:
-            if self.reward_calculator.prev_p1_rider >= 95.0 and p1_rider < 10.0:
-                if self.debug:
-                    print("[Cutscene] Rider Finale connected! Pausing training dynamically...")
+        # Detect round/match reset (both players restored to full HP from a damaged/dead state)
+        # to ensure round_steps is kept accurate for desperation mode calculation
+        if (p1_hp >= 298.0 and p2_hp >= 298.0 and 
+            (self.reward_calculator.prev_p1_hp < 290.0 or self.reward_calculator.prev_p2_hp < 290.0)):
+            if self.debug:
+                print(f"[Env] New round/match detected (HP restored to {p1_hp:.1f}/{p2_hp:.1f}). Resetting round steps.")
+            self.round_steps = 0
+            
+        p1_guard, p2_guard = self.hud_parser.read_guard_gauges(bgr_full)
+        p1_rider, p2_rider = self.hud_parser.read_rider_gauges(bgr_full)
+        combo_count = self.hud_parser.read_combo_count(bgr_full)
+        p1_rounds, p2_rounds = self.hud_parser.read_rounds_won(bgr_full)
+        is_infinite = self.hud_parser.is_timer_infinite(bgr_full)
+        
+        # Check if opponent (P2) connected a Rider Finale on Hiyori (P1)
+        # Triggered when opponent had full meter, health bars suddenly disappear, and Hiyori did not initiate a finisher.
+        opponent_finisher_connected = False
+        if (self.reward_calculator.prev_p2_rider >= 95.0 and 
+            p1_hp == 0.0 and p2_hp == 0.0 and 
+            self.reward_calculator.prev_p1_hp > 0.0 and self.reward_calculator.prev_p2_hp > 0.0 and
+            action != Climax_Action.RIDER_FINALE and self.prev_action != Climax_Action.RIDER_FINALE):
+            opponent_finisher_connected = True
+
+        # Check if Hiyori (P1) successfully connected a Rider Finale on P2
+        hiyori_finisher_connected = False
+        if (action == Climax_Action.RIDER_FINALE or self.prev_action == Climax_Action.RIDER_FINALE) and \
+           (self.reward_calculator.prev_p1_rider >= 95.0 and p1_rider < 10.0):
+            hiyori_finisher_connected = True
+
+        # Pause training dynamically until the cinematic cutscene finishes and the HUD reappears
+        if hiyori_finisher_connected or opponent_finisher_connected:
+            if self.debug:
+                if hiyori_finisher_connected:
+                    print("[Cutscene] Hiyori Rider Finale connected! Pausing training dynamically...")
+                else:
+                    print("[Cutscene] Opponent Rider Finale connected! Hiyori hit! Pausing training dynamically...")
                 
-                # 1. Sleep baseline of 4.0 seconds to allow cinematic to start and HUD to hide
-                time.sleep(4.0)
-                
-                # 2. Poll every 200ms for health bar reappearance (resumption of combat HUD)
-                max_wait = 12.0  # safety cap
-                start_wait = time.time()
-                while time.time() - start_wait < max_wait:
-                    raw_img = np.array(self.sct.grab(self.window_region))
-                    hsv_temp = cv2.cvtColor(raw_img, cv2.COLOR_BGRA2HSV)
-                    h1, h2 = self.hud_parser.read_hps(hsv_temp)
-                    if h1 > 0.0 or h2 > 0.0:
-                        if self.debug:
-                            print(f"[Cutscene] HUD detected. Resumed combat after {time.time() - start_wait + 4.0:.1f} seconds.")
-                        break
-                    time.sleep(0.2)
-                
-                # Re-read states and rebuild stack after cutscene completes
+            # 1. Sleep baseline of 8.0 seconds to allow cinematic to start and HUD to hide
+            time.sleep(8.0)
+            
+            # 2. Poll every 200ms for health bar reappearance (resumption of combat HUD)
+            max_wait = 12.0  # safety cap
+            start_wait = time.time()
+            while time.time() - start_wait < max_wait:
                 raw_img = np.array(self.sct.grab(self.window_region))
-                hsv_full = cv2.cvtColor(raw_img, cv2.COLOR_BGRA2HSV)
-                p1_hp, p2_hp = self.hud_parser.read_hps(hsv_full)
-                p1_guard, p2_guard = self.hud_parser.read_guard_gauges(hsv_full)
-                p1_rider, p2_rider = self.hud_parser.read_rider_gauges(hsv_full)
-                combo_count = self.hud_parser.read_combo_count(hsv_full)
-                p1_rounds, p2_rounds = self.hud_parser.read_rounds_won(hsv_full)
-                is_infinite = self.hud_parser.is_timer_infinite(hsv_full)
-                
-                gray = cv2.cvtColor(raw_img, cv2.COLOR_BGRA2GRAY)
-                obs_frame = cv2.resize(gray, (84, 84))
-                for _ in range(4):
-                    self.frame_stack.append(obs_frame)
-                stacked_obs = self._get_stacked_obs()
+                h1, h2 = self.hud_parser.read_hps(raw_img[:, :, :3])
+                if h1 > 0.0 or h2 > 0.0:
+                    if self.debug:
+                        print(f"[Cutscene] HUD detected. Resumed combat after {time.time() - start_wait + 8.0:.1f} seconds.")
+                    break
+                time.sleep(0.2)
+            
+            # Re-read states and rebuild stack after cutscene completes
+            raw_img = np.array(self.sct.grab(self.window_region))
+            bgr_full = raw_img[:, :, :3]
+            p1_hp, p2_hp = self.hud_parser.read_hps(bgr_full)
+            p1_guard, p2_guard = self.hud_parser.read_guard_gauges(bgr_full)
+            p1_rider, p2_rider = self.hud_parser.read_rider_gauges(bgr_full)
+            combo_count = self.hud_parser.read_combo_count(bgr_full)
+            p1_rounds, p2_rounds = self.hud_parser.read_rounds_won(bgr_full)
+            is_infinite = self.hud_parser.is_timer_infinite(bgr_full)
+            
+            gray = cv2.cvtColor(raw_img, cv2.COLOR_BGRA2GRAY)
+            obs_frame = cv2.resize(gray, (84, 84))
+            for _ in range(4):
+                self.frame_stack.append(obs_frame)
+            stacked_obs = self._get_stacked_obs()
 
         reward = self.reward_calculator.calculate_reward(
             p1_hp, p2_hp, p1_guard, p2_guard, p1_rider, p2_rider, combo_count, 
-            p1_rounds, p2_rounds, is_infinite, action, self.prev_action, self.round_steps
+            p1_rounds, p2_rounds, is_infinite, action, self.prev_action, self.round_steps,
+            opponent_finisher_connected=opponent_finisher_connected
         )
         
         # AI runs infinitely in a single continuous episode
         terminated = False
         truncated = False
         
+        # Periodic CPU garbage collection to ensure no memory bloat/slowdown over long training runs (approx. every 30 seconds of play)
+        if self.round_steps % 1000 == 0:
+            gc.collect()
+            
         return stacked_obs, reward, terminated, truncated, {}
 
     def _check_user_takeover(self):
@@ -315,10 +356,6 @@ class Climax_Heroes_Env(gym.Env):
             if joy_id is not None and joy_id in self.physical_joy_ids:
                 if event.type in [pygame.JOYBUTTONDOWN, pygame.JOYHATMOTION]:
                     self.last_user_input_time = time.time()
-                elif event.type == pygame.JOYAXISMOTION:
-                    # Ignore analog drift noise with a 0.3 threshold deadzone
-                    if abs(event.value) > 0.3:
-                        self.last_user_input_time = time.time()
 
     def close(self):
         self.sct.close()

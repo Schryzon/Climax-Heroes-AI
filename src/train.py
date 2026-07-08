@@ -1,5 +1,6 @@
 import os
 import sys
+import gc
 import torch
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import CheckpointCallback, CallbackList, BaseCallback
@@ -16,8 +17,35 @@ class Cuda_Cache_Callback(BaseCallback):
     def _on_rollout_end(self) -> None:
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
+        gc.collect()
+
+class ClimaxCheckpointCallback(BaseCallback):
+    def __init__(self, save_freq, save_path, name_prefix, verbose=0):
+        super().__init__(verbose)
+        self.save_freq = save_freq
+        self.save_path = save_path
+        self.name_prefix = name_prefix
+        self.last_save_multiple = 0
+
+    def _on_step(self) -> bool:
+        current_steps = self.model.num_timesteps
+        current_multiple = current_steps // self.save_freq
+        
+        # Initialize the baseline multiple on first step to prevent immediate double saves
+        if self.last_save_multiple == 0:
+            self.last_save_multiple = current_multiple
+            
+        if current_multiple > self.last_save_multiple:
+            self.last_save_multiple = current_multiple
+            save_steps = current_multiple * self.save_freq
+            os.makedirs(self.save_path, exist_ok=True)
+            path = os.path.join(self.save_path, f"{self.name_prefix}_{save_steps}_steps")
+            self.model.save(path)
+            print(f"\n[Checkpoint] Saved model checkpoint to {path}.zip (Total steps: {current_steps})")
+        return True
 
 def train():
+    tb_process = None
     print("=" * 60)
     print("         KAMEN RIDER CLIMAX HEROES AI - PPO TRAINING")
     print("=" * 60)
@@ -36,8 +64,8 @@ def train():
     print("Initializing environment...")
     env = Climax_Heroes_Env(debug=True)
     
-    # Configure Checkpoint Callback to save weights periodically (every ~38 mins of play)
-    checkpoint_callback = CheckpointCallback(
+    # Configure Checkpoint Callback to save weights at absolute step multiples
+    checkpoint_callback = ClimaxCheckpointCallback(
         save_freq=30000,
         save_path="./checkpoints/",
         name_prefix="climax_ppo_model"
@@ -57,12 +85,59 @@ def train():
         print(f"Found existing saved model weights: {latest_save}")
         print("Resuming training from loaded weights...")
         try:
-            model = PPO.load(latest_save, env=env, device=device, custom_objects={"learning_rate": 1.5e-4, "target_kl": 0.025})
+            model = PPO.load(latest_save, env=env, device=device, custom_objects={"learning_rate": 1.5e-4, "target_kl": 0.025, "n_steps": 2048})
             is_resumed = True
         except Exception as e:
-            print(f"Warning: Failed to load saved weights ({e}).")
-            print("Action space size or model shape may have changed. Fallback to initializing from scratch...")
-            model = None
+            print(f"Warning: Direct checkpoint load failed ({e}).")
+            print("Action space mismatch detected. Performing Net Surgery to salvage weights...")
+            try:
+                # 1. Initialize a fresh model with the new action space shape
+                model = PPO(
+                    "CnnPolicy",
+                    env,
+                    learning_rate=1.5e-4,
+                    n_steps=2048,
+                    batch_size=128,
+                    n_epochs=4,
+                    gamma=0.99,
+                    gae_lambda=0.95,
+                    clip_range=0.2,
+                    ent_coef=0.08,
+                    vf_coef=0.5,
+                    max_grad_norm=0.5,
+                    target_kl=0.025,
+                    verbose=1,
+                    tensorboard_log="./tb_logs/",
+                    device=device
+                )
+                
+                # 2. Extract policy parameters and metadata from the old zip file
+                from stable_baselines3.common.save_util import load_from_zip_file
+                data, params, _ = load_from_zip_file(latest_save, device=device)
+                
+                if "policy" in params:
+                    state_dict = params["policy"]
+                    # Remove mismatched action net weights
+                    keys_to_remove = ["action_net.weight", "action_net.bias"]
+                    for k in keys_to_remove:
+                        if k in state_dict:
+                            del state_dict[k]
+                    # Warm-start feature extractor and value heads
+                    model.policy.load_state_dict(state_dict, strict=False)
+                    
+                    # 3. Restore the correct accumulated timestep count from the saved metadata
+                    if data and "num_timesteps" in data:
+                        model.num_timesteps = data["num_timesteps"]
+                        
+                    print(f"[Net Surgery] Successfully warm-started: Loaded feature extractor & MLP layers!")
+                    print(f"              Resuming training steps from: {model.num_timesteps}")
+                    is_resumed = True
+                else:
+                    print("Warning: Policy weights not found in zip. Falling back to fresh training...")
+                    model = None
+            except Exception as surgery_err:
+                print(f"Warning: Net Surgery failed ({surgery_err}). Falling back to fresh training...")
+                model = None
             
     if model is None:
         print("Initializing a new model from scratch...")
@@ -70,7 +145,7 @@ def train():
             "CnnPolicy",
             env,
             learning_rate=1.5e-4,
-            n_steps=512,
+            n_steps=2048,
             batch_size=128,
             n_epochs=4,
             gamma=0.99,
@@ -85,9 +160,33 @@ def train():
             device=device
         )
     
+    # Start TensorBoard automatically in the background
+    import subprocess
+    import socket
+    
+    # Dynamically find the primary local IP address to print the correct link
+    local_ip = "127.0.0.1"
+    try:
+        dummy_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        dummy_socket.connect(("8.8.8.8", 80))
+        local_ip = dummy_socket.getsockname()[0]
+        dummy_socket.close()
+    except Exception:
+        pass
+
+    try:
+        # Launch TensorBoard binding to 0.0.0.0 (all network interfaces) so it can be viewed on your phone
+        tb_process = subprocess.Popen(
+            [sys.executable, "-m", "tensorboard.main", "--logdir", "./tb_logs/", "--host", "0.0.0.0", "--port", "6006"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+        print("[Train] Background TensorBoard server started automatically.")
+        print(f"        Access it on your phone/browser at: http://{local_ip}:6006")
+    except Exception as e:
+        print(f"Warning: Could not start TensorBoard server automatically ({e}).")
+        
     print("\nStarting training loop...")
-    print("To monitor training, run the following in another terminal:")
-    print("  python312 -m tensorboard --logdir ./tb_logs/")
     print("Press Ctrl+C to stop training and save weights.")
     print("=" * 60)
     
@@ -109,6 +208,13 @@ def train():
     finally:
         print("Closing environment...")
         env.close()
+        if tb_process is not None:
+            print("Stopping TensorBoard server...")
+            try:
+                tb_process.terminate()
+                tb_process.wait(timeout=2.0)
+            except Exception:
+                pass
         print("Done!")
 
 if __name__ == "__main__":

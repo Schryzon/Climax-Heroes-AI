@@ -2,14 +2,14 @@ import cv2
 import numpy as np
 
 class Hud_Parser:
-    def read_hps(self, hsv):
-        h, w, _ = hsv.shape
+    def read_hps(self, bgr):
+        h, w, _ = bgr.shape
         p1_x1, p1_x2 = int(w * 0.220), int(w * 0.445)
         p2_x1, p2_x2 = int(w * 0.555), int(w * 0.780)
         y1, y2 = int(h * 0.087), int(h * 0.113)
         
-        p1_crop = hsv[y1:y2, p1_x1:p1_x2]
-        p2_crop = hsv[y1:y2, p2_x1:p2_x2]
+        p1_crop = cv2.cvtColor(bgr[y1:y2, p1_x1:p1_x2], cv2.COLOR_BGR2HSV)
+        p2_crop = cv2.cvtColor(bgr[y1:y2, p2_x1:p2_x2], cv2.COLOR_BGR2HSV)
         
         return (self._estimate_layered_hp(p1_crop), 
                 self._estimate_layered_hp(p2_crop))
@@ -62,14 +62,14 @@ class Hud_Parser:
             
         return 0.0
 
-    def read_guard_gauges(self, hsv):
-        h, w, _ = hsv.shape
+    def read_guard_gauges(self, bgr):
+        h, w, _ = bgr.shape
         p1_x1, p1_x2 = int(w * 0.220), int(w * 0.336)
         p2_x1, p2_x2 = int(w * 0.664), int(w * 0.780)
         y1, y2 = int(h * 0.120), int(h * 0.138)
         
-        p1_crop = hsv[y1:y2, p1_x1:p1_x2]
-        p2_crop = hsv[y1:y2, p2_x1:p2_x2]
+        p1_crop = cv2.cvtColor(bgr[y1:y2, p1_x1:p1_x2], cv2.COLOR_BGR2HSV)
+        p2_crop = cv2.cvtColor(bgr[y1:y2, p2_x1:p2_x2], cv2.COLOR_BGR2HSV)
         
         return (self._estimate_guard_gauge_color(p1_crop), 
                 self._estimate_guard_gauge_color(p2_crop))
@@ -102,14 +102,14 @@ class Hud_Parser:
         pct = (active_cols / (cols * max_active_fraction)) * 100.0
         return min(100.0, pct)
 
-    def read_rider_gauges(self, hsv):
-        h, w, _ = hsv.shape
+    def read_rider_gauges(self, bgr):
+        h, w, _ = bgr.shape
         p1_x1, p1_x2 = int(w * 0.220), int(w * 0.380)
         p2_x1, p2_x2 = int(w * 0.620), int(w * 0.780)
         y1, y2 = int(h * 0.884), int(h * 0.921)
         
-        p1_crop = hsv[y1:y2, p1_x1:p1_x2]
-        p2_crop = hsv[y1:y2, p2_x1:p2_x2]
+        p1_crop = cv2.cvtColor(bgr[y1:y2, p1_x1:p1_x2], cv2.COLOR_BGR2HSV)
+        p2_crop = cv2.cvtColor(bgr[y1:y2, p2_x1:p2_x2], cv2.COLOR_BGR2HSV)
         
         return (self._estimate_gauge_color(p1_crop), 
                 self._estimate_gauge_color(p2_crop))
@@ -141,22 +141,25 @@ class Hud_Parser:
         pct = (active_cols / (cols * max_active_fraction)) * 100.0
         return min(100.0, pct)
 
-    def read_combo_count(self, hsv):
+    def read_combo_count(self, bgr):
         # Optional: OCR / template-matching for combo count later
         return 0
 
-    def read_rounds_won(self, hsv):
-        h, w, _ = hsv.shape
+    def read_rounds_won(self, bgr):
+        h, w, _ = bgr.shape
         p1_x1, p1_x2 = int(w * 0.441), int(w * 0.472)
         p2_x1, p2_x2 = int(w * 0.528), int(w * 0.559)
         y1, y2 = int(h * 0.137), int(h * 0.212)
         
-        p1_crop = hsv[y1:y2, p1_x1:p1_x2]
-        p2_crop = hsv[y1:y2, p2_x1:p2_x2]
+        p1_crop_bgr = bgr[y1:y2, p1_x1:p1_x2]
+        p2_crop_bgr = bgr[y1:y2, p2_x1:p2_x2]
         
-        if p1_crop.size == 0 or p2_crop.size == 0:
+        if p1_crop_bgr.size == 0 or p2_crop_bgr.size == 0:
             return 0, 0
             
+        p1_crop = cv2.cvtColor(p1_crop_bgr, cv2.COLOR_BGR2HSV)
+        p2_crop = cv2.cvtColor(p2_crop_bgr, cv2.COLOR_BGR2HSV)
+        
         lower_yellow = np.array([15, 80, 80])
         upper_yellow = np.array([45, 255, 255])
         
@@ -180,15 +183,16 @@ class Hud_Parser:
             
         return p1_rounds, p2_rounds
 
-    def is_timer_infinite(self, hsv):
-        h, w, _ = hsv.shape
+    def is_timer_infinite(self, bgr):
+        h, w, _ = bgr.shape
         t_x1, t_x2 = int(w * 0.468), int(w * 0.531)
         t_y1, t_y2 = int(h * 0.087), int(h * 0.156)
         
-        timer_crop = hsv[t_y1:t_y2, t_x1:t_x2]
-        if timer_crop.size == 0:
+        timer_crop_bgr = bgr[t_y1:t_y2, t_x1:t_x2]
+        if timer_crop_bgr.size == 0:
             return False
             
+        timer_crop = cv2.cvtColor(timer_crop_bgr, cv2.COLOR_BGR2HSV)
         # Mint green HSV range for the infinity symbol
         lower_mint = np.array([40, 30, 150])
         upper_mint = np.array([80, 180, 255])
@@ -196,20 +200,22 @@ class Hud_Parser:
         
         return np.sum(mask > 0) > 100
 
-    def is_survival_game_over(self, hsv):
-        h, w, _ = hsv.shape
-        
-        # Crop the bottom banner area: y = [0.60, 0.85], x = [0.10, 0.90]
-        # In 1024x575: y: 345 to 488, x: 102 to 921
-        banner_area = hsv[345:488, 102:921]
+    def is_survival_game_over(self, bgr):
+        h, w, _ = bgr.shape
+        # Crop the bottom banner area dynamically: y = [0.60, 0.85], x = [0.10, 0.90]
+        y1, y2 = int(h * 0.60), int(h * 0.85)
+        x1, x2 = int(w * 0.10), int(w * 0.90)
+        banner_area = cv2.cvtColor(bgr[y1:y2, x1:x2], cv2.COLOR_BGR2HSV)
         
         # Teal HSV range for the banner background
         lower_teal = np.array([85, 100, 100])
         upper_teal = np.array([115, 255, 255])
         mask_teal = cv2.inRange(banner_area, lower_teal, upper_teal)
         
-        # Crop the Proceed button pill area on the right: y = [380, 460], x = [700, 880]
-        proceed_hsv = hsv[380:460, 700:880]
+        # Crop the Proceed button pill area on the right dynamically: y = [0.66, 0.80], x = [0.68, 0.86]
+        py1, py2 = int(h * 0.66), int(h * 0.80)
+        px1, px2 = int(w * 0.68), int(w * 0.86)
+        proceed_hsv = cv2.cvtColor(bgr[py1:py2, px1:px2], cv2.COLOR_BGR2HSV)
         
         # Red HSV range for the Circle button prompt inside the pill
         lower_red1 = np.array([0, 100, 100])
@@ -222,11 +228,11 @@ class Hud_Parser:
         
         return np.sum(mask_teal > 0) > 30000 and np.sum(mask_red > 0) > 100
 
-    def is_vs_splash_screen(self, hsv):
-        h, w, _ = hsv.shape
+    def is_vs_splash_screen(self, bgr):
+        h, w, _ = bgr.shape
         
         # Crop the upper sky region of the screen (y = 10% to 45%) where the artificial green backdrop boxes live.
-        sky_hsv = hsv[int(h * 0.10):int(h * 0.45), int(w * 0.05):int(w * 0.95)]
+        sky_hsv = cv2.cvtColor(bgr[int(h * 0.10):int(h * 0.45), int(w * 0.05):int(w * 0.95)], cv2.COLOR_BGR2HSV)
         
         # Artificial backdrop green box: Hue: 40-75, Sat: 50-255, Val: 50-255
         lower_green = np.array([40, 50, 50])
@@ -234,23 +240,25 @@ class Hud_Parser:
         mask_green = cv2.inRange(sky_hsv, lower_green, upper_green)
         
         # Orange/red background canvas (Hue: 10-30, Sat: 100-255, Val: 100-255)
+        hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
         lower_orange = np.array([10, 100, 100])
         upper_orange = np.array([30, 255, 255])
         mask_orange = cv2.inRange(hsv, lower_orange, upper_orange)
         
         return np.sum(mask_green > 0) > 20000 and np.sum(mask_orange > 0) > 40000
 
-    def is_now_loading_screen(self, hsv):
-        h, w, _ = hsv.shape
+    def is_now_loading_screen(self, bgr):
+        h, w, _ = bgr.shape
         
         # Crop around the pink card symbol on the bottom black bar:
         c_x1, c_x2 = int(w * 0.50), int(w * 0.60)
         c_y1, c_y2 = int(h * 0.78), int(h * 0.94)
         
-        card_crop = hsv[c_y1:c_y2, c_x1:c_x2]
-        if card_crop.size == 0:
+        card_crop_bgr = bgr[c_y1:c_y2, c_x1:c_x2]
+        if card_crop_bgr.size == 0:
             return False
             
+        card_crop = cv2.cvtColor(card_crop_bgr, cv2.COLOR_BGR2HSV)
         lower_pink = np.array([140, 80, 80])
         upper_pink = np.array([170, 255, 255])
         mask_pink = cv2.inRange(card_crop, lower_pink, upper_pink)

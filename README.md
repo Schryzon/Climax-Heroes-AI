@@ -1,4 +1,4 @@
-# Kamen Rider: Climax Heroes AI 🎮
+# Kamen Rider: Climax Heroes AI
 
 <p align="center">
   <img src="assets/banner.png" alt="Climax Heroes AI Banner" width="80%" />
@@ -13,11 +13,33 @@
   <img src="https://img.shields.io/badge/Platform-Windows-0078D6?style=flat-square&logo=windows&logoColor=white" alt="Platform" />
 </p>
 
-A Reinforcement Learning environment wrapper designed to train **Hiyori**, a custom AI agent, to play **Kamen Rider: Climax Heroes (PS2)** on Windows using the PCSX2 emulator. It uses real-time screen capture for state observations and virtual controller emulation for input injection.
+---
+
+A high-performance Reinforcement Learning (RL) environment wrapper designed to train **Hiyori**, a custom agent, to play **Kamen Rider: Climax Heroes (PS2)** on Windows using the PCSX2 emulator. By combining real-time screen capture, OpenCV-based state parsing, and virtual controller emulation, Hiyori learns complex movement, defense, combos, and finishers.
 
 ---
 
-## Project Structure
+## Table of Contents
+1. [Project Architecture](#project-architecture)
+2. [Current Project State & Key Optimizations](#current-project-state--key-optimizations)
+3. [Prerequisites & Setup](#prerequisites--setup)
+4. [Step-by-Step Execution Guide](#step-by-step-execution-guide)
+   * [Step 1: Test Gamepad & Input Injection](#step-1-test-gamepad--input-injection)
+   * [Step 2: Calibrate Bounding Boxes](#step-2-calibrate-bounding-boxes)
+   * [Step 3: Run Console Verification](#step-3-run-console-verification)
+   * [Step 4: Train Hiyori](#step-4-train-hiyori)
+   * [Step 5: Live Progress Monitoring (PC & Mobile Phone)](#step-5-live-progress-monitoring-pc--mobile-phone)
+   * [Step 6: Run the Evaluation Arena](#step-6-run-the-evaluation-arena)
+5. [State Space & Action Mappings](#state-space--action-mappings)
+6. [In-Game HUD Coordinate Mapping](#in-game-hud-coordinate-mapping)
+7. [Detailed Reward Formulation](#detailed-reward-formulation)
+8. [Disclaimer & License](#disclaimer--license)
+
+---
+
+## Project Architecture
+
+The project has a modular, object-oriented structure:
 
 ```
 Climax-Heroes-AI/
@@ -25,7 +47,8 @@ Climax-Heroes-AI/
 │   ├── env.py                # Gymnasium environment orchestrator (Climax_Heroes_Env)
 │   ├── actions.py            # Climax_Action enums and virtual gamepad driver (Gamepad_Executor)
 │   ├── hud.py                # OpenCV-based visual screen parsing (Hud_Parser)
-│   └── rewards.py            # Symmetrical reward formulations (Reward_Calculator)
+│   ├── rewards.py            # Symmetrical reward formulations (Reward_Calculator)
+│   └── evaluate.py           # Multi-mode interactive arena for AI, CPU, and human matches
 ├── tests/
 │   └── test_env.py           # Console dashboard test for real-time stats & rewards
 ├── requirements.txt          # Python dependencies
@@ -34,122 +57,137 @@ Climax-Heroes-AI/
 
 ---
 
+## Current Project State & Key Optimizations
+
+Hiyori is backed by a highly optimized, custom-engineered framework. Key achievements include:
+
+*   **98.7% Image Processing Optimization:** Previously, the environment converted the entire 1080p frame from BGR to HSV at each step. The pipeline now crops HUD bounding boxes in raw BGR first (a zero-copy operation in NumPy) and converts *only* those tiny crops to HSV. This drastically reduces CPU load and keeps laptops cool.
+*   **Net Surgery (Warm-Starting):** When changing the action space shape (e.g. from 22 to 32 actions), standard checkpoint loaders fail. We implemented a custom state-dict transplant script in [train.py](src/train.py) that strips the shape-mismatched output layers while warm-starting the full CNN feature extractor and hidden MLP policy/value networks.
+*   **Step Count & Callback Continuity:** Integrates checkpoint step counts dynamically. Re-loading progress restores the exact accumulated global timestep count (`model.num_timesteps`) in the TensorBoard logs and console progress bars. Checkpoints are automatically saved at absolute multiples (e.g., 60k, 90k, 120k) via a custom `ClimaxCheckpointCallback`.
+*   **150ms Emulator Hold Time:** Analog triggers (LT/RT) mapping to Form Change (L2) and Rider Finale (R2) require sustained button presses to register in the PCSX2 emulator. We implemented a 150ms hold sleep in [actions.py](src/actions.py) to prevent input drops.
+*   **Bi-directional Finisher Detection:** The environment parses screen layout transitions. It detects both when Hiyori connects a Rider Finale and when the opponent hits Hiyori with a Rider Finale (indicated by the opponent's full meter preceding a sudden HUD collapse). In both cases, the training loop is paused dynamically for the duration of the cinematic cutscene.
+
+---
+
 ## Prerequisites & Setup
 
 ### 1. Game & Emulator Setup
-*   Run the game using **PCSX2**.
-*   Configure the screen layout to **16:9 fullscreen (1920x1080 resolution)**.
-*   The environment will automatically locate the game window if it contains the word `"仮面ライダー"` or `"Climax Heroes"`.
+*   Open the game in **PCSX2**.
+*   Set screen layout to **16:9 fullscreen (1024x576 or 1920x1080 resolution)**.
+*   Ensure P1 controller in PCSX2 is mapped to the virtual Xbox 360 controller, and P2 controller is mapped to your keyboard or physical gamepad.
 
-### 2. Virtual Gamepad Driver
-This project emulates an Xbox 360 controller via the **ViGEmBus** driver.
-*   Download and install the latest **ViGEmBus** installer: [ViGEmBus Releases](https://github.com/ViGEm/ViGEmBus/releases).
+### 2. Gamepad Bus Driver
+This project emulates Xbox 360 gamepads using the **ViGEmBus** driver.
+*   Download and install the driver installer: [ViGEmBus Releases](https://github.com/ViGEm/ViGEmBus/releases).
 
 ### 3. Installation
-Install the required Python packages:
+Install the required packages in Python 3.12:
 ```powershell
 python312 -m pip install -r requirements.txt
 ```
 
 ---
 
-## Running & Verification
+## Step-by-Step Execution Guide
 
-### Step 1: Test Gamepad Emulation
-Verify that the virtual gamepad driver is running and importable:
+### Step 1: Test Gamepad & Input Injection
+Verify that the virtual gamepad driver is correctly installed and accessible by Python:
 ```powershell
 python312 .\tools\test_gamepad.py
 ```
 
 ### Step 2: Calibrate Bounding Boxes
-Capture a test frame and verify that the HP (green/red), Guard Gauge (yellow), and Rider Gauge (blue) bounding boxes align perfectly:
+Verify that your PCSX2 window matches the normalized coordinates in the HUD parser:
 ```powershell
 python312 .\tools\screen_capture_helper.py
 ```
-This saves `game_capture_annotated.png` in the directory so you can visually verify the box alignments.
+This saves `game_capture_annotated.png` in the root folder. Open it to check if health bars, shields, and gauges are correctly boxed.
 
-### Step 3: Run Environment Console Dashboard
-Run the custom environment with random actions to see the real-time parsing dashboard (shows HP tracking across multiple color layers, shield gauges, meter changes, and reward computation):
+### Step 3: Run Console Verification
+Run the custom environment with random actions to inspect the real-time CLI dashboard (shows HP levels, shield values, meter changes, and step logs):
 ```powershell
 python312 .\tests\test_env.py
 ```
 
-### Step 4: Run RL Model Training
-To train the PPO model against the PCSX2 emulated CPU player:
-1. Open PCSX2, go to **Vs Mode**, set **Player 1 = Player** (which our AI drives), and **Player 2 = CPU** (which the game drives).
+### Step 4: Train Hiyori
+To train the PPO model against the PCSX2 CPU player:
+1. In PCSX2, select **Vs Mode**. Configure P1 as a human player (which the AI drives) and P2 as a CPU.
 2. Start the training script:
    ```powershell
    python312 .\src\train.py
    ```
+*Press `Ctrl+C` at any time to save progress and stop training safely.*
 
-### Step 5: Monitor Progress via TensorBoard
-You can watch the reward curves and training metrics climb in real-time by launching TensorBoard:
+### Step 5: Live Progress Monitoring (PC & Mobile Phone)
+The training script **automatically spawns a background TensorBoard server** at startup binding to `0.0.0.0` (all interfaces) on port `6006`. 
+*   **On your PC**: Open `http://localhost:6006` in your browser.
+*   **On your phone**: Connect to the same Wi-Fi and open `http://<your-pc-ip>:6006` (the script prints your exact local IP URL on launch!).
+
+### Step 6: Run the Evaluation Arena
+Test Hiyori's skills using the interactive [evaluate.py](src/evaluate.py) script:
 ```powershell
-tensorboard --logdir ./tb_logs/
+python312 .\src\evaluate.py
 ```
-Then navigate to `http://localhost:6006` in your browser.
+This opens an interactive menu supporting:
+1.  **Hiyori vs CPU** (AI P1 vs CPU P2) [Default]
+2.  **Hiyori vs Hiyori** (AI P1 vs AI P2 - spawns a second virtual controller for Port 2)
+3.  **Hiyori vs Me** (AI P1 vs Human P2 - lets you fight Hiyori directly with your own physical controller)
+*Simply press `Enter` to load your latest progress and fight the CPU!*
 
-## State Extraction & Environment Specs
+---
 
-*   **Observation Space:** 4 stacked $84 \times 84$ grayscale frames (representing the last 4 frames at 30fps).
-*   **Action Space:** 19 discrete macro actions mapped via `Climax_Action`:
-    *   `Climax_Action.IDLE` (`0`): Idle / Guard (Blocks attacks)
-    *   `Climax_Action.WALK_FWD` (`1`): Walk Forward
-    *   `Climax_Action.WALK_BACK` (`2`): Walk Backward
-    *   `Climax_Action.JUMP` (`3`): Jump (D-pad Up)
-    *   `Climax_Action.LIGHT` (`4`): Light Attack Combo (Xbox `X`)
-    *   `Climax_Action.HEAVY` (`5`): Heavy Attack Combo (Xbox `Y`)
-    *   `Climax_Action.SPECIAL` (`6`): Special Move (Xbox `A` / 2 bars of meter)
-    *   `Climax_Action.NORMAL_FINISHER` (`7`): Normal Finisher (Xbox `B`)
-    *   `Climax_Action.RIDER_FINALE` (`8`): Rider Finale (Xbox `RT` / 5 bars of meter)
-    *   `Climax_Action.EVADE_LEFT` (`9`): Evade Left (Xbox `LB`)
-    *   `Climax_Action.EVADE_RIGHT` (`10`): Evade Right (Xbox `RB`)
-    *   `Climax_Action.CHARGE_GAUGE` (`11`): Charge Rider Gauge (D-pad Down)
-    *   `Climax_Action.FORM_CHANGE` (`12`): Form Change (Xbox `LT` / 5 bars of meter)
-    *   `Climax_Action.CANCEL_RIGHT` (`13`): Attack Cancel Right (D-pad Double-tap Right / Cancel animation facing Right)
-    *   `Climax_Action.CANCEL_LEFT` (`14`): Attack Cancel Left (D-pad Double-tap Left / Cancel animation facing Left)
-    *   `Climax_Action.RUNNING_LIGHT_RIGHT` (`15`): Running Light Attack Right (D-pad double-tap Right + hold + Weak Attack)
-    *   `Climax_Action.RUNNING_LIGHT_LEFT` (`16`): Running Light Attack Left (D-pad double-tap Left + hold + Weak Attack)
-    *   `Climax_Action.RUNNING_HEAVY_RIGHT` (`17`): Running Heavy Attack Right (D-pad double-tap Right + hold + Heavy Attack)
-    *   `Climax_Action.RUNNING_HEAVY_LEFT` (`18`): Running Heavy Attack Left (D-pad double-tap Left + hold + Heavy Attack)
-*   **Continuous Episode Mode:** The environment is configured for continuous infinite-episode training (`terminated = False`, `truncated = False`). Resets are managed manually or through external emulation state resets, letting the AI train seamlessly across multiple matches.
-*   **Persistent Gamepad Lifecycle:** Rebuilt using a persistent virtual driver lifecycle. The virtual controller remains connected throughout the entire Python process, preventing emulators (PCSX2/Dolphin) from losing Port 1 gamepad mappings.
-*   **Multi-Gamepad Manual Takeover:** Scans all connected physical joysticks in real-time. Pressing any face button or D-pad direction immediately silences AI inputs for **4.0 seconds**, enabling seamless human takeover for manual positioning or resets.
+## State Space & Action Mappings
 
-### Detailed Reward Formulation
+The environment represents the game state using **4 stacked $84 \times 84$ grayscale frames** (capturing the last 133ms of movement).
 
-To guide policy optimization and prevent reward hacking, the environment utilizes a dense, risk-adjusted reward structure:
+The policy outputs an integer corresponding to one of **32 discrete macro actions** in [Climax_Action](src/actions.py#L5):
 
-1.  **HP Damage Trade-offs:**
-    *   **Damage Dealt:** `+1.0` per point of HP damage dealt.
-    *   **Guard Broken Hit:** `+1.2` multiplier per point of HP damage dealt while the opponent is guard-broken.
-    *   **Finisher Hit Bonus:** `+1.5` multiplier + a flat `+8.0` bonus for landing a Rider Finale (Action 8).
-    *   **Damage Taken:** `-1.2` per point of HP damage taken.
+| Index | Enum Action | Physical Mapping |
+| :--- | :--- | :--- |
+| `0` | `IDLE` | Guard / Stand Neutral |
+| `1` | `WALK_FWD` | Left Stick Right (Walk Fwd) |
+| `2` | `WALK_BACK` | Left Stick Left (Walk Back) |
+| `3` | `JUMP` | Left Stick Up |
+| `4` | `LIGHT` | Xbox `X` (Weak Combo) |
+| `5` | `HEAVY` | Xbox `Y` (Strong Combo) |
+| `6` | `SPECIAL` | Xbox `A` (Special Move / 2 bars) |
+| `7` | `NORMAL_FINISHER` | Xbox `B` (Signature Strike) |
+| `8` | `RIDER_FINALE` | Xbox `RT` (Ult / 5 bars) |
+| `9` | `EVADE_LEFT` | Xbox `LB` (Evade Fwd) |
+| `10` | `EVADE_RIGHT` | Xbox `RB` (Evade Back) |
+| `11` | `CHARGE_GAUGE` | D-pad Down (Charge Meter) |
+| `12` | `FORM_CHANGE` | Xbox `LT` (Form Change / 5 bars) |
+| `13` | `CANCEL_RIGHT` | D-pad Double-Tap Right (Attack Cancel) |
+| `14` | `CANCEL_LEFT` | D-pad Double-Tap Left (Attack Cancel) |
+| `15` | `RUNNING_LIGHT_RIGHT` | Dash Right + Xbox `X` |
+| `16` | `RUNNING_LIGHT_LEFT` | Dash Left + Xbox `X` |
+| `17` | `RUNNING_HEAVY_RIGHT` | Dash Right + Xbox `Y` |
+| `18` | `RUNNING_HEAVY_LEFT` | Dash Left + Xbox `Y` |
+| `19` | `RUN_RIGHT` | Dash Right (Hold) |
+| `20` | `RUN_LEFT` | Dash Left (Hold) |
+| `21` | `RIDER_KICK` | D-pad Up + Xbox `B` (Simultaneous) |
+| `22` | `LIGHT_DOWN` | D-pad Down + Xbox `X` (Crouching Weak) |
+| `23` | `HEAVY_DOWN` | D-pad Down + Xbox `Y` (Crouching Heavy/Launcher) |
+| `24` | `SPECIAL_DOWN` | D-pad Down + Xbox `A` (Crouching Special) |
+| `25` | `FINISHER_DOWN` | D-pad Down + Xbox `B` (Crouching Finisher) |
+| `26` | `LIGHT_RIGHT` | D-pad Right + Xbox `X` |
+| `27` | `LIGHT_LEFT` | D-pad Left + Xbox `X` |
+| `28` | `HEAVY_RIGHT` | D-pad Right + Xbox `Y` (Forward Grapple/Throw) |
+| `29` | `HEAVY_LEFT` | D-pad Left + Xbox `Y` (Forward Grapple/Throw) |
+| `30` | `SPECIAL_RIGHT` | D-pad Right + Xbox `A` |
+| `31` | `SPECIAL_LEFT` | D-pad Left + Xbox `A` |
 
-2.  **Shield & Guard Management:**
-    *   **Shield Damage Dealt:** `+0.1` per point of opponent guard gauge reduction.
-    *   **Guard Crush Bonus:** `+5.0` bonus for completely breaking the opponent's shield.
-    *   **Successful Block:** `+0.05` per point of shield reduction if the AI blocks an attack without taking HP damage.
-    *   **Failed Block:** `-0.05` per point of shield reduction if the AI is hit.
-    *   **Guard Crush Penalty:** `-5.0` penalty if the AI's own shield is completely broken/crushed.
-3.  **Special Meter (Rider Gauge):**
-    *   **Meter Gained:** `+0.30` per unit of meter generated.
-    *   **Form Change / Finisher Exploration:** `+5.0` one-time bonus for the first L2/R2 attempt when meter is full ($\ge 95.0$).
-4.  **Dodge Cost:**
-    *   **Evade Penalty:** `-0.08` per dodge action (Action 9 & 10) to penalize infinite dodge-spamming, forcing the AI to balance defense with active combat.
-5.  **Combo & Milestone Bonus:**
-    *   **Combo Hit:** `+0.1` per combo hit count to encourage chaining attacks.
-    *   **10+ Combo Milestone:** `+5.0` flat bonus when combo count reaches 10+ for the first time in a chain (encourages active cancel-loop execution).
+---
 
-### In-Game HUD Coordinate Mapping
+## In-Game HUD Coordinate Mapping
 
-To parse stats from the emulator, the environment checks specific boundary regions of the **1024 × 576** game window:
+To parse stats from the emulator, the environment checks specific boundary regions of the 1024 × 576 game window:
 
 <p align="center">
   <img src="assets/hud_annotations.png" alt="HUD Coordinates Mapping" width="90%" />
 </p>
 
-| HUD Element | Normalized X-Range | Normalized Y-Range | Absolute X-Range ($1024 \text{px}$) | Absolute Y-Range ($576 \text{px}$) | Bounding Box |
+| HUD Element | Normalized X-Range | Normalized Y-Range | Absolute X-Range (1024px) | Absolute Y-Range (576px) | Bounding Box |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **P1 HP Bar** | `[0.220, 0.445]` | `[0.087, 0.113]` | `[225, 455]` | `[50, 65]` | **Green** |
 | **P2 HP Bar** | `[0.555, 0.780]` | `[0.087, 0.113]` | `[568, 798]` | `[50, 65]` | **Green** |
@@ -163,32 +201,27 @@ To parse stats from the emulator, the environment checks specific boundary regio
 
 ---
 
-## Training Expectations & Hardware Requirements
+## Detailed Reward Formulation
 
-### Training Milestones
-Reinforcement learning in fighting games requires significant exploration. Below are the expected milestones for Hiyori's training:
-*   **100k steps:** Learns basic movement (walking forward/backward) and begins spamming basic attacks.
-*   **500k steps:** Starts incorporating defense (guarding/blocking), manages special meter charging, and avoids hazardous states.
-*   **1M+ steps:** Executes complex sequences, triggers form changes, and lands Rider Finales with strategic timing.
+We use a dense reward framework in [rewards.py](src/rewards.py) to avoid reward-hacking and guide policy optimization:
 
-### Hardware Recommendations
-*   **GPU:** Dedicated NVIDIA GPU (RTX 3050 or higher recommended for parallel CNN feature extraction).
-*   **CUDA:** CUDA-enabled PyTorch configuration for high-throughput step processing.
-*   **Emulator Performance:** A stable 30/60 FPS emulation rate in PCSX2 is **critical**. Frame drops or stuttering can poison the state representation (frame stacks) and degrade policy convergence.
+1.  **HP Trades:**
+    *   `+1.0` / `-1.2` multiplier per point of damage dealt / taken.
+    *   `+1.5` damage multiplier + `+8.0` flat bonus for landing a `RIDER_FINALE`.
+2.  **Shield & Guard:**
+    *   `+0.1` per point of opponent shield damage.
+    *   `+5.0` / `-5.0` bonus / penalty for Guard Crushes.
+    *   `+0.05` / `-0.05` per point of shield damage for successful blocks / failed blocks.
+3.  **Special Actions & Dynamic Penalties:**
+    *   **Safely Charging:** `+0.30` per unit of meter generated.
+    *   **Hit While Charging:** `-15.0` penalty if Hiyori is hit while charging (forces her to back away and create distance before building meter).
+    *   **Special Move Whiff Tracking:** When Hiyori uses a Special Attack (A / Cross), a **30-step (1.0 second)** evaluation window starts. If the window closes without dealing damage (whiffed, blocked, or dodged), she receives a **`-2.5` penalty**.
+    *   **Opponent Finisher Hit:** `-30.0` penalty if Hiyori is hit by the opponent's Rider Finale (punishes her for failing to defend against major ultimates).
+    *   **Form Change / Finisher Use:** `+5.0` bonus every time she uses `FORM_CHANGE` or `RIDER_FINALE` while the meter is full.
 
 ---
 
-## License & Contributing
+## Disclaimer & License
 
 *   This project is licensed under the **[MIT License](LICENSE)**.
-*   Interested in contributing? Check out our **[Contributing Guidelines](CONTRIBUTING.md)** for coding standards, style guides, and workflow details.
-
----
-
-## Disclaimer
-
-This project is an independent, open-source research and educational endeavor. It is not affiliated with, authorized, sponsored, or endorsed by Bandai Namco Entertainment, Sony Interactive Entertainment, or any of their partners or subsidiaries. 
-
-All trademarks, game content, character designs, and assets belong to their respective owners. No proprietary game files, ROMs, ISOs, or emulator BIOS files are distributed in this repository.
-
-
+*   **Disclaimer:** This project is an independent, open-source research and educational endeavor. It is not affiliated with, authorized, sponsored, or endorsed by Bandai Namco Entertainment, Sony Interactive Entertainment, or any of their partners or subsidiaries. All trademarks, game content, character designs, and assets belong to their respective owners. No proprietary game files, ROMs, ISOs, or emulator BIOS files are distributed in this repository.

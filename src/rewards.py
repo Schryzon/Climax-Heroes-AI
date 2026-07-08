@@ -15,8 +15,10 @@ class Reward_Calculator:
         self.prev_combo_count = 0
         self.p1_form_changed = False
         self.p1_finisher_attempted = False
+        self.special_active_steps = 0
+        self.special_hit_detected = False
         
-    def calculate_reward(self, p1_hp, p2_hp, p1_guard, p2_guard, p1_rider, p2_rider, combo_count, p1_rounds, p2_rounds, is_infinite, last_action, prev_action, round_steps):
+    def calculate_reward(self, p1_hp, p2_hp, p1_guard, p2_guard, p1_rider, p2_rider, combo_count, p1_rounds, p2_rounds, is_infinite, last_action, prev_action, round_steps, opponent_finisher_connected=False):
         # 1. HP damage dealt (to P2) vs taken (by P1)
         damage_dealt = max(0.0, self.prev_p2_hp - p2_hp)
         damage_taken = max(0.0, self.prev_p1_hp - p1_hp)
@@ -62,28 +64,57 @@ class Reward_Calculator:
         if last_action in [Climax_Action.EVADE_LEFT, Climax_Action.EVADE_RIGHT]:
             reward -= 0.08
 
+        # Heavy penalty for getting hit while charging (forces charging at a safe distance)
+        if last_action == Climax_Action.CHARGE_GAUGE and damage_taken > 0:
+            reward -= 15.0
+            if self.debug:
+                print(f"[Reward] Hit while charging penalty! damage_taken={damage_taken:.1f}. -15.0 penalty.")
+
         # Cancel penalty: Hiyori must only cancel during an attack string
         if last_action in [Climax_Action.CANCEL_RIGHT, Climax_Action.CANCEL_LEFT]:
             if prev_action not in [
                 Climax_Action.LIGHT, Climax_Action.HEAVY, Climax_Action.SPECIAL, 
                 Climax_Action.NORMAL_FINISHER, Climax_Action.RIDER_FINALE,
                 Climax_Action.RUNNING_LIGHT_RIGHT, Climax_Action.RUNNING_LIGHT_LEFT,
-                Climax_Action.RUNNING_HEAVY_RIGHT, Climax_Action.RUNNING_HEAVY_LEFT
+                Climax_Action.RUNNING_HEAVY_RIGHT, Climax_Action.RUNNING_HEAVY_LEFT,
+                Climax_Action.LIGHT_DOWN, Climax_Action.HEAVY_DOWN, Climax_Action.SPECIAL_DOWN, Climax_Action.FINISHER_DOWN,
+                Climax_Action.LIGHT_RIGHT, Climax_Action.LIGHT_LEFT,
+                Climax_Action.HEAVY_RIGHT, Climax_Action.HEAVY_LEFT,
+                Climax_Action.SPECIAL_RIGHT, Climax_Action.SPECIAL_LEFT
             ]:
                 reward -= 0.15  # Naked cancel penalty in neutral
 
+        # Track special move (Cross / Xbox A) hit success window (punishes mindless spamming/whiffs)
+        if last_action in [Climax_Action.SPECIAL, Climax_Action.SPECIAL_DOWN, Climax_Action.SPECIAL_RIGHT, Climax_Action.SPECIAL_LEFT]:
+            if self.special_active_steps == 0:
+                self.special_active_steps = 30  # 1.0 second window at 30fps
+                self.special_hit_detected = False
+                
+        if self.special_active_steps > 0:
+            self.special_active_steps -= 1
+            if damage_dealt > 0:
+                self.special_hit_detected = True
+            if self.special_active_steps == 0 and not self.special_hit_detected:
+                reward -= 2.5
+                if self.debug:
+                    print("[Reward] Special move failed to hit (whiff/block)! -2.5 penalty.")
+
+        # Punish getting hit by opponent's Rider Finale (finisher)
+        if opponent_finisher_connected:
+            reward -= 30.0
+            if self.debug:
+                print("[Reward] Smacked by Opponent's Rider Finale! -30.0 penalty.")
+
         # Form Change (L2) and Finisher (R2) attempt rewards when meter is full
         if self.prev_p1_rider >= 95.0:
-            if last_action == Climax_Action.FORM_CHANGE and not self.p1_form_changed:
+            if last_action == Climax_Action.FORM_CHANGE:
                 reward += 5.0
-                self.p1_form_changed = True
                 if self.debug:
-                    print("[Reward] First Form Change triggered! +5.0 bonus.")
-            elif last_action == Climax_Action.RIDER_FINALE and not self.p1_finisher_attempted:
+                    print("[Reward] Form Change triggered with full meter! +5.0 bonus.")
+            elif last_action == Climax_Action.RIDER_FINALE:
                 reward += 5.0
-                self.p1_finisher_attempted = True
                 if self.debug:
-                    print("[Reward] First Rider Finale triggered! +5.0 bonus.")
+                    print("[Reward] Rider Finale triggered with full meter! +5.0 bonus.")
         
         # 4. Combo bonus
         if combo_count > 0:

@@ -25,7 +25,7 @@ def test_custom_env():
     print("-" * 90)
     
     for i in range(100):
-        # Sample a random action (0 to 18)
+        # Sample a random action (0 to 31)
         action = env.action_space.sample()
         
         # Step the environment

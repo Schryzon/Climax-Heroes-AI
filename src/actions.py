@@ -22,6 +22,19 @@ class Climax_Action(IntEnum):
     RUNNING_LIGHT_LEFT = 16
     RUNNING_HEAVY_RIGHT = 17
     RUNNING_HEAVY_LEFT = 18
+    RUN_RIGHT = 19
+    RUN_LEFT = 20
+    RIDER_KICK = 21
+    LIGHT_DOWN = 22
+    HEAVY_DOWN = 23
+    SPECIAL_DOWN = 24
+    FINISHER_DOWN = 25
+    LIGHT_RIGHT = 26
+    LIGHT_LEFT = 27
+    HEAVY_RIGHT = 28
+    HEAVY_LEFT = 29
+    SPECIAL_RIGHT = 30
+    SPECIAL_LEFT = 31
 
 class Gamepad_Executor:
     def __init__(self, gamepad=None):
@@ -60,6 +73,8 @@ class Gamepad_Executor:
             self.gamepad.press_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_B)
         elif action == Climax_Action.RIDER_FINALE:
             self.gamepad.right_trigger(value=255)
+            self.gamepad.update()
+            time.sleep(0.15)
         elif action == Climax_Action.EVADE_LEFT:
             self.gamepad.press_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_LEFT_SHOULDER)
         elif action == Climax_Action.EVADE_RIGHT:
@@ -68,6 +83,8 @@ class Gamepad_Executor:
             self.gamepad.press_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_DOWN)
         elif action == Climax_Action.FORM_CHANGE:
             self.gamepad.left_trigger(value=255)
+            self.gamepad.update()
+            time.sleep(0.15)
         elif action == Climax_Action.CANCEL_RIGHT:
             self._execute_cancel(vg.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_RIGHT)
         elif action == Climax_Action.CANCEL_LEFT:
@@ -80,7 +97,44 @@ class Gamepad_Executor:
             self._execute_running_attack(vg.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_RIGHT, vg.XUSB_BUTTON.XUSB_GAMEPAD_Y)
         elif action == Climax_Action.RUNNING_HEAVY_LEFT:
             self._execute_running_attack(vg.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_LEFT, vg.XUSB_BUTTON.XUSB_GAMEPAD_Y)
-
+        elif action == Climax_Action.RUN_RIGHT:
+            self._execute_run(vg.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_RIGHT)
+        elif action == Climax_Action.RUN_LEFT:
+            self._execute_run(vg.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_LEFT)
+        elif action == Climax_Action.RIDER_KICK:
+            self.gamepad.press_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_UP)
+            self.gamepad.press_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_B)
+        elif action == Climax_Action.LIGHT_DOWN:
+            self.gamepad.left_joystick(x_value=0, y_value=-32768)
+            self.gamepad.press_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_X)
+        elif action == Climax_Action.HEAVY_DOWN:
+            self.gamepad.left_joystick(x_value=0, y_value=-32768)
+            self.gamepad.press_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_Y)
+        elif action == Climax_Action.SPECIAL_DOWN:
+            self.gamepad.left_joystick(x_value=0, y_value=-32768)
+            self.gamepad.press_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_A)
+        elif action == Climax_Action.FINISHER_DOWN:
+            self.gamepad.left_joystick(x_value=0, y_value=-32768)
+            self.gamepad.press_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_B)
+        elif action == Climax_Action.LIGHT_RIGHT:
+            self.gamepad.left_joystick(x_value=32767, y_value=0)
+            self.gamepad.press_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_X)
+        elif action == Climax_Action.LIGHT_LEFT:
+            self.gamepad.left_joystick(x_value=-32768, y_value=0)
+            self.gamepad.press_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_X)
+        elif action == Climax_Action.HEAVY_RIGHT:
+            self.gamepad.left_joystick(x_value=32767, y_value=0)
+            self.gamepad.press_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_Y)
+        elif action == Climax_Action.HEAVY_LEFT:
+            self.gamepad.left_joystick(x_value=-32768, y_value=0)
+            self.gamepad.press_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_Y)
+        elif action == Climax_Action.SPECIAL_RIGHT:
+            self.gamepad.left_joystick(x_value=32767, y_value=0)
+            self.gamepad.press_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_A)
+        elif action == Climax_Action.SPECIAL_LEFT:
+            self.gamepad.left_joystick(x_value=-32768, y_value=0)
+            self.gamepad.press_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_A)
+            
         self.gamepad.update()
 
     def release_all(self):
@@ -139,4 +193,27 @@ class Gamepad_Executor:
         # 5. Release all
         self.gamepad.release_button(button=dpad_btn)
         self.gamepad.release_button(button=attack_btn)
+        self.gamepad.update()
+
+    def _execute_run(self, dpad_btn):
+        if self.gamepad is None:
+            return
+        
+        # 1. Tap direction
+        self.gamepad.press_button(button=dpad_btn)
+        self.gamepad.update()
+        time.sleep(0.02)
+        
+        # 2. Release direction
+        self.gamepad.release_button(button=dpad_btn)
+        self.gamepad.update()
+        time.sleep(0.02)
+        
+        # 3. Hold direction (running)
+        self.gamepad.press_button(button=dpad_btn)
+        self.gamepad.update()
+        time.sleep(0.35)
+        
+        # 4. Release direction
+        self.gamepad.release_button(button=dpad_btn)
         self.gamepad.update()

@@ -5,3 +5,4 @@ pygetwindow
 gymnasium
 stable-baselines3
 vgamepad
+pygame
