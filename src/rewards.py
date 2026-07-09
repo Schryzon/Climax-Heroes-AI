@@ -72,9 +72,11 @@ class Reward_Calculator:
             if self.debug:
                 print(f"[Reward] Hit while charging penalty! damage_taken={damage_taken:.1f}. -15.0 penalty.")
 
-        # Cancel penalty: Hiyori must only cancel during an attack string
+        # Cancel/Quick Step logic:
+        # - If done during an attack: It's a Rider Cancel (consumes 1 bar of meter, costs -0.5).
+        # - If done in neutral: It's a Quick Step (free movement, minor cost -0.08 to prevent spam, same as dodge).
         if last_action in [Climax_Action.CANCEL_RIGHT, Climax_Action.CANCEL_LEFT]:
-            if prev_action not in [
+            if prev_action in [
                 Climax_Action.LIGHT, Climax_Action.HEAVY, Climax_Action.SPECIAL, 
                 Climax_Action.NORMAL_FINISHER, Climax_Action.RIDER_FINALE,
                 Climax_Action.RUNNING_LIGHT_RIGHT, Climax_Action.RUNNING_LIGHT_LEFT,
@@ -84,7 +86,13 @@ class Reward_Calculator:
                 Climax_Action.HEAVY_RIGHT, Climax_Action.HEAVY_LEFT,
                 Climax_Action.SPECIAL_RIGHT, Climax_Action.SPECIAL_LEFT
             ]:
-                reward -= 0.15  # Naked cancel penalty in neutral
+                reward -= 0.5  # Attack Cancel (Rider Cancel) cost
+                if self.debug:
+                    print("[Reward] Attack cancel executed. -0.5 cost.")
+            else:
+                reward -= 0.08  # Quick Step in neutral (free movement)
+                if self.debug:
+                    print("[Reward] Quick Step in neutral. -0.08 cost.")
 
         # Track special move (Cross / Xbox A) hit success window (punishes mindless spamming/whiffs)
         if last_action in [Climax_Action.SPECIAL, Climax_Action.SPECIAL_DOWN, Climax_Action.SPECIAL_RIGHT, Climax_Action.SPECIAL_LEFT]:

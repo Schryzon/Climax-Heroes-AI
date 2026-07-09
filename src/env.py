@@ -1,3 +1,13 @@
+import ctypes
+# Make Python DPI-aware on Windows to prevent display scaling from cropping screen capture
+try:
+    ctypes.windll.shcore.SetProcessDpiAwareness(2) # PROCESS_PER_MONITOR_DPI_AWARE
+except Exception:
+    try:
+        ctypes.windll.user32.SetProcessDPIAware()
+    except Exception:
+        pass
+
 import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
@@ -76,8 +86,8 @@ class Climax_Heroes_Env(gym.Env):
         self.virtual_joystick_guid = None
         self.virtual_joystick_name = None
         if self.gamepad is not None and len(detected_joysticks) > 0:
-            # Press the START button on the virtual gamepad
-            self.gamepad.press_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_START)
+            # Press the BACK button on the virtual gamepad to identify it (prevents pausing the game)
+            self.gamepad.press_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_BACK)
             self.gamepad.update()
             time.sleep(0.1) # Wait for Windows XInput driver registration
             pygame.event.pump()
@@ -85,8 +95,8 @@ class Climax_Heroes_Env(gym.Env):
             for j in detected_joysticks:
                 is_virtual = False
                 try:
-                    # Check button 7 (Xbox START button index)
-                    if j.get_numbuttons() > 7 and j.get_button(7):
+                    # Check button 6 (Xbox BACK/SELECT button index)
+                    if j.get_numbuttons() > 6 and j.get_button(6):
                         is_virtual = True
                 except Exception:
                     pass
@@ -110,8 +120,8 @@ class Climax_Heroes_Env(gym.Env):
                     print(f"[Env] Identified virtual controller to exclude: {j.get_name()} (GUID: {self.virtual_joystick_guid})")
                     break
             
-            # Release the START button
-            self.gamepad.release_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_START)
+            # Release the BACK button
+            self.gamepad.release_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_BACK)
             self.gamepad.update()
             
         self.joysticks = []
@@ -171,6 +181,7 @@ class Climax_Heroes_Env(gym.Env):
 
     def _detect_game_window(self):
         keywords = ["仮面ライダー", "PCSX2", "Dolphin", "Climax Heroes"]
+        self.game_win = None
         for kw in keywords:
             windows = gw.getWindowsWithTitle(kw)
             if not windows:
@@ -178,6 +189,7 @@ class Climax_Heroes_Env(gym.Env):
                 windows = [gw.getWindowsWithTitle(t)[0] for t in all_titles if kw.lower() in t.lower()]
             if windows:
                 win = windows[0]
+                self.game_win = win
                 print(f"[Env] Found game window: '{win.title}' ({win.width}x{win.height})")
                 return {"top": win.top, "left": win.left, "width": win.width, "height": win.height}
         # Fallback: Use primary monitor dimensions to prevent screenshot scaling/boundary errors
@@ -188,6 +200,14 @@ class Climax_Heroes_Env(gym.Env):
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
         
+        # Bring game window to focus dynamically if detected
+        if hasattr(self, 'game_win') and self.game_win is not None:
+            try:
+                self.game_win.activate()
+                time.sleep(0.2)
+            except Exception:
+                pass
+                
         # Release all gamepad buttons to a neutral state
         self.gamepad_executor.release_all()
         self.reward_calculator.reset()
@@ -287,7 +307,8 @@ class Climax_Heroes_Env(gym.Env):
         # Check if Hiyori (P1) successfully connected a Rider Finale on P2
         hiyori_finisher_connected = False
         if (action == Climax_Action.RIDER_FINALE or self.prev_action == Climax_Action.RIDER_FINALE) and \
-           (self.reward_calculator.prev_p1_rider >= 95.0 and p1_rider < 10.0):
+           (self.reward_calculator.prev_p1_rider >= 95.0 and p1_rider < 10.0) and \
+           (p1_hp == 0.0 and p2_hp == 0.0):
             hiyori_finisher_connected = True
 
         # Pause training dynamically until the cinematic cutscene finishes and the HUD reappears

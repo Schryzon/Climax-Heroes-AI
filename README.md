@@ -142,6 +142,7 @@ This opens an interactive menu supporting:
 2.  **Hiyori vs Hiyori** (AI P1 vs AI P2 - spawns a second virtual controller for Port 2)
 3.  **Hiyori vs Me** (AI P1 vs Human P2 - lets you fight Hiyori directly with your own physical controller)
 *Simply press `Enter` to load your latest progress and fight the CPU!*
+*   **Note on Playstyle:** By default, the evaluation arena runs Hiyori in stochastic (non-deterministic) mode (`deterministic=False`). This allows her to sample from her learned action distribution, producing the same dynamic and organic playstyle observed during training. If you want her to play strictly deterministically, you can edit `src/evaluate.py`.
 
 ---
 
@@ -228,6 +229,9 @@ We use a dense reward framework in [rewards.py](src/rewards.py) to avoid reward-
     *   **Rider Kick Whiff Tracking:** When Hiyori executes a Rider Kick (D-pad Up + Xbox `B`), a **45-step (1.5 second)** evaluation window starts. If it whiffs or gets blocked, she receives a **`-3.0` penalty**.
     *   **Opponent Finisher Hit:** `-30.0` penalty if Hiyori is hit by the opponent's Rider Finale (punishes her for failing to defend against major ultimates).
     *   **Form Change / Finisher Use:** `+5.0` bonus every time she uses `FORM_CHANGE` or `RIDER_FINALE` while the meter is full.
+    *   **Cancel / Quick Step Logic:** 
+        *   **Rider Cancel (In Combat):** If executed during an attack string, it is treated as a Rider Cancel (spends meter) and costs **`-0.5`** to prevent meter wasting.
+        *   **Quick Step (In Neutral):** If executed in neutral, it is treated as a Quick Step (free movement) and costs **`-0.08`** (same as a normal dodge) to prevent infinite backstep spamming.
 4.  **Red Shoes System (Thematic Berserk Protocol):**
     *   Only active when the match timer is finite.
     *   If the time remaining drops below **20 seconds** AND Hiyori (P1) is trailing in HP (`p1_hp < p2_hp`), the forced-combat **Red Shoes System** triggers (a reference to the secret berserk protocol in Kabuto/Gatack's Zecters).

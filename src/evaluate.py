@@ -109,12 +109,12 @@ def run_evaluation():
     try:
         while True:
             # P1 predicts and steps through the environment
-            action_idx1, _ = model1.predict(obs, deterministic=True)
+            action_idx1, _ = model1.predict(obs, deterministic=False)
             obs, reward, terminated, truncated, info = env.step(action_idx1)
             
             # P2 predicts and executes if in AI vs AI mode
             if mode == "2" and model2 is not None and executor2 is not None:
-                action_idx2, _ = model2.predict(obs, deterministic=True)
+                action_idx2, _ = model2.predict(obs, deterministic=False)
                 action2 = Climax_Action(action_idx2)
                 executor2.execute_action(action2, prev_action2)
                 prev_action2 = action2
