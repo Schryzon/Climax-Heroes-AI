@@ -62,7 +62,7 @@ def train():
 
     # Initialize custom environment (auto-detects emulated game window)
     print("Initializing environment...")
-    env = Climax_Heroes_Env(debug=True)
+    env = Climax_Heroes_Env(debug=False)
     
     # Configure Checkpoint Callback to save weights at absolute step multiples
     checkpoint_callback = ClimaxCheckpointCallback(
@@ -85,7 +85,7 @@ def train():
         print(f"Found existing saved model weights: {latest_save}")
         print("Resuming training from loaded weights...")
         try:
-            model = PPO.load(latest_save, env=env, device=device, custom_objects={"learning_rate": 1.5e-4, "target_kl": 0.025, "n_steps": 2048})
+            model = PPO.load(latest_save, env=env, device=device, custom_objects={"learning_rate": 1.0e-4, "target_kl": 0.03, "n_steps": 2048})
             is_resumed = True
         except Exception as e:
             print(f"Warning: Direct checkpoint load failed ({e}).")
@@ -95,7 +95,7 @@ def train():
                 model = PPO(
                     "CnnPolicy",
                     env,
-                    learning_rate=1.5e-4,
+                    learning_rate=1.0e-4,
                     n_steps=2048,
                     batch_size=128,
                     n_epochs=4,
@@ -105,7 +105,7 @@ def train():
                     ent_coef=0.08,
                     vf_coef=0.5,
                     max_grad_norm=0.5,
-                    target_kl=0.025,
+                    target_kl=0.03,
                     verbose=1,
                     tensorboard_log="./tb_logs/",
                     device=device
@@ -144,7 +144,7 @@ def train():
         model = PPO(
             "CnnPolicy",
             env,
-            learning_rate=1.5e-4,
+            learning_rate=1.0e-4,
             n_steps=2048,
             batch_size=128,
             n_epochs=4,
@@ -154,7 +154,7 @@ def train():
             ent_coef=0.08,
             vf_coef=0.5,
             max_grad_norm=0.5,
-            target_kl=0.025,
+            target_kl=0.03,
             verbose=1,
             tensorboard_log="./tb_logs/",
             device=device
