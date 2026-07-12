@@ -38,8 +38,8 @@ class Climax_Heroes_Env(gym.Env):
         self.debug = debug
         self.enable_takeover = enable_takeover
         
-        # Action space: 32 discrete actions mapped via Climax_Action enum
-        self.action_space = gym.spaces.Discrete(32)
+        # Action space: 34 discrete actions mapped via Climax_Action enum
+        self.action_space = gym.spaces.Discrete(34)
         
         # Observation space: 4 stacked 84x84 grayscale frames
         self.observation_space = gym.spaces.Box(

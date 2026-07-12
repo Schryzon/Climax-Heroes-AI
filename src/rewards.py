@@ -113,7 +113,8 @@ class Reward_Calculator:
                 Climax_Action.LIGHT_DOWN, Climax_Action.HEAVY_DOWN, Climax_Action.SPECIAL_DOWN, Climax_Action.FINISHER_DOWN,
                 Climax_Action.LIGHT_RIGHT, Climax_Action.LIGHT_LEFT,
                 Climax_Action.HEAVY_RIGHT, Climax_Action.HEAVY_LEFT,
-                Climax_Action.SPECIAL_RIGHT, Climax_Action.SPECIAL_LEFT
+                Climax_Action.SPECIAL_RIGHT, Climax_Action.SPECIAL_LEFT,
+                Climax_Action.FINISHER_RIGHT, Climax_Action.FINISHER_LEFT
             ]:
                 reward -= 0.5  # Attack Cancel (Rider Cancel) cost
                 if self.debug:

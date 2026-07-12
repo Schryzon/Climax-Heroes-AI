@@ -157,7 +157,7 @@ This opens an interactive menu supporting:
 
 The environment represents the game state using **4 stacked $84 \times 84$ grayscale frames** (capturing the last 133ms of movement).
 
-The policy outputs an integer corresponding to one of **32 discrete macro actions** in [Climax_Action](src/actions.py#L5):
+The policy outputs an integer corresponding to one of **34 discrete macro actions** in [Climax_Action](src/actions.py#L5):
 
 | Index | Enum Action | Physical Mapping |
 | :--- | :--- | :--- |
@@ -193,6 +193,8 @@ The policy outputs an integer corresponding to one of **32 discrete macro action
 | `29` | `HEAVY_LEFT` | D-pad Left + Xbox `Y` (Forward Grapple/Throw) |
 | `30` | `SPECIAL_RIGHT` | D-pad Right + Xbox `A` |
 | `31` | `SPECIAL_LEFT` | D-pad Left + Xbox `A` |
+| `32` | `FINISHER_RIGHT` | D-pad Right + Xbox `B` |
+| `33` | `FINISHER_LEFT` | D-pad Left + Xbox `B` |
 
 ---
 

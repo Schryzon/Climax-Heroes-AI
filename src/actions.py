@@ -35,6 +35,8 @@ class Climax_Action(IntEnum):
     HEAVY_LEFT = 29
     SPECIAL_RIGHT = 30
     SPECIAL_LEFT = 31
+    FINISHER_RIGHT = 32
+    FINISHER_LEFT = 33
 
 class Gamepad_Executor:
     def __init__(self, gamepad=None):
@@ -138,6 +140,12 @@ class Gamepad_Executor:
         elif action == Climax_Action.SPECIAL_LEFT:
             self.gamepad.left_joystick(x_value=-32768, y_value=0)
             self.gamepad.press_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_A)
+        elif action == Climax_Action.FINISHER_RIGHT:
+            self.gamepad.press_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_RIGHT)
+            self.gamepad.press_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_B)
+        elif action == Climax_Action.FINISHER_LEFT:
+            self.gamepad.press_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_LEFT)
+            self.gamepad.press_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_B)
             
         self.gamepad.update()
 
