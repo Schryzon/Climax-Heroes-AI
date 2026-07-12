@@ -64,8 +64,15 @@ Hiyori is backed by a highly optimized, custom-engineered framework. Key achieve
 *   **98.7% Image Processing Optimization:** Previously, the environment converted the entire 1080p frame from BGR to HSV at each step. The pipeline now crops HUD bounding boxes in raw BGR first (a zero-copy operation in NumPy) and converts *only* those tiny crops to HSV. This drastically reduces CPU load and keeps laptops cool.
 *   **Net Surgery (Warm-Starting):** When changing the action space shape (e.g. from 22 to 32 actions), standard checkpoint loaders fail. We implemented a custom state-dict transplant script in [train.py](src/train.py) that strips the shape-mismatched output layers while warm-starting the full CNN feature extractor and hidden MLP policy/value networks.
 *   **Step Count & Callback Continuity:** Integrates checkpoint step counts dynamically. Re-loading progress restores the exact accumulated global timestep count (`model.num_timesteps`) in the TensorBoard logs and console progress bars. Checkpoints are automatically saved at absolute multiples (e.g., 60k, 90k, 120k) via a custom `ClimaxCheckpointCallback`.
-*   **150ms Emulator Hold Time:** Analog triggers (LT/RT) mapping to Form Change (L2) and Rider Finale (R2) require sustained button presses to register in the PCSX2 emulator. We implemented a 150ms hold sleep in [actions.py](src/actions.py) to prevent input drops.
+*   **300ms Emulator Hold Time & Release:** Analog triggers (LT/RT) mapping to Form Change (L2) and Rider Finale (R2) require sustained button presses to register in the PCSX2 emulator. We implemented a 300ms hold sleep and explicit gamepad release in [actions.py](src/actions.py) to guarantee the emulator registers the input.
 *   **Bi-directional Finisher Detection:** The environment parses screen layout transitions. It detects both when Hiyori connects a Rider Finale and when the opponent hits Hiyori with a Rider Finale (indicated by the opponent's full meter preceding a sudden HUD collapse). In both cases, the training loop is paused dynamically for the duration of the cinematic cutscene.
+*   **Action Redirection & Assisted Injections:** To prevent Hiyori from discharging her meter before transforming, we intercept and redirect actions:
+    *   **Charge Redirection:** If the meter is $>75.0\%$, attempts to use `CHARGE_GAUGE` are redirected to `FORM_CHANGE`.
+    *   **Special Redirection:** If the meter is $\ge 80.0\%$, attempts to use Specials are redirected to `FORM_CHANGE`.
+    *   **Dual Injection Pool:** When the meter is strictly full ($\ge 95.0\%$), a 20% injection probability chooses randomly between `FORM_CHANGE` (60% weight) and `RIDER_FINALE` (40% weight) to assist exploration.
+    *   *Note: Redirection and injection console logs are debug-mode exclusive.*
+*   **Action Persistence (Sticky Charging):** Frame-by-frame PPO models struggle to hold down buttons. If Hiyori initiates a `CHARGE_GAUGE` action, the environment locks it for a minimum of **60 steps (~2.0 seconds)** to guarantee substantial meter gain. This lock is immediately broken if she takes damage, allowing immediate recovery and defense.
+*   **Stabilized PPO Training:** Adjusted hyperparameters in [train.py](src/train.py) to set `target_kl = 0.08` and `learning_rate = 5.0e-5` to accommodate dense rewards without early stopping.
 
 ---
 
@@ -213,26 +220,33 @@ To parse stats from the emulator, the environment checks specific boundary regio
 
 ## Detailed Reward Formulation
 
-We use a dense reward framework in [rewards.py](src/rewards.py) to avoid reward-hacking and guide policy optimization:
+We use a dense, scaled reward framework in [rewards.py](src/rewards.py) to avoid reward-hacking and stabilize gradient updates:
 
 1.  **HP Trades:**
     *   `+1.0` / `-1.2` multiplier per point of damage dealt / taken.
-    *   `+1.5` damage multiplier + `+8.0` flat bonus for landing a `RIDER_FINALE`.
+    *   `+1.5` damage multiplier + `+1.6` flat bonus for landing a `RIDER_FINALE`.
 2.  **Shield & Guard:**
     *   `+0.1` per point of opponent shield damage.
-    *   `+5.0` / `-5.0` bonus / penalty for Guard Crushes.
+    *   `+1.0` / `-1.0` bonus / penalty for Guard Crushes.
     *   `+0.05` / `-0.05` per point of shield damage for successful blocks / failed blocks.
 3.  **Special Actions & Dynamic Penalties:**
     *   **Safely Charging:** `+0.30` per unit of meter generated.
-    *   **Hit While Charging:** `-15.0` penalty if Hiyori is hit while charging (forces her to back away and create distance before building meter).
-    *   **Special Move Whiff Tracking:** When Hiyori uses a Special Attack (A / Cross), a **30-step (1.0 second)** evaluation window starts. If the window closes without dealing damage (whiffed, blocked, or dodged), she receives a **`-2.5` penalty**.
-    *   **Rider Kick Whiff Tracking:** When Hiyori executes a Rider Kick (D-pad Up + Xbox `B`), a **45-step (1.5 second)** evaluation window starts. If it whiffs or gets blocked, she receives a **`-3.0` penalty**.
-    *   **Opponent Finisher Hit:** `-30.0` penalty if Hiyori is hit by the opponent's Rider Finale (punishes her for failing to defend against major ultimates).
-    *   **Form Change / Finisher Use:** `+5.0` bonus every time she uses `FORM_CHANGE` or `RIDER_FINALE` while the meter is full.
+    *   **Hit While Charging:** `-3.0` penalty if Hiyori is hit while charging (forces her to back away and create distance before building meter).
+    *   **Special Move Whiff Tracking:** When Hiyori uses a Special Attack, a **30-step (1.0 second)** evaluation window starts. If it whiffs or gets blocked, she receives a **`-0.5` penalty**.
+    *   **Rider Kick Whiff Tracking:** When Hiyori executes a Rider Kick, a **45-step (1.5 second)** evaluation window starts. If it whiffs, she receives a **`-0.6` penalty**.
+    *   **Opponent Finisher Hit:** `-6.0` penalty if Hiyori is hit by the opponent's Rider Finale (punishes her for failing to defend against ultimates).
+    *   **Form Change / Finisher Use:** `+1.0` bonus every time she uses `FORM_CHANGE` or `RIDER_FINALE` while the meter is full.
+    *   **Normal Form Special Move Cost:** A flat **`-0.2`** action cost when executing any Special move in normal form to break the habit of spamming specials.
+    *   **Consecutive Special Spam Penalty:** A flat **`-0.5`** penalty if she performs a Special move immediately following another Special, breaking summon spam loops (like Auto-Vajin).
     *   **Cancel / Quick Step Logic:** 
         *   **Rider Cancel (In Combat):** If executed during an attack string, it is treated as a Rider Cancel (spends meter) and costs **`-0.5`** to prevent meter wasting.
         *   **Quick Step (In Neutral):** If executed in neutral, it is treated as a Quick Step (free movement) and costs **`-0.08`** (same as a normal dodge) to prevent infinite backstep spamming.
-4.  **Red Shoes System (Thematic Berserk Protocol):**
+4.  **Form Change / Speed State Mechanics:**
+    *   **Form Change State Tracking:** A consecutive frame depletion checker monitors both players' Rider Gauges. If a player's gauge decreases steadily by `[0.1, 5.0]` units per step for **10 consecutive frames** without hitting zero, they are flagged as being in "Form Change".
+    *   **Counter Form Change Bonus:** If Hiyori activates a Form Change while the opponent is currently active in Form Change, she receives an additional `+2.0` (total **`+3.0`**) "Counter Form Change" bonus to encourage matching the opponent's speed.
+    *   **Opponent Form Change Special Penalty:** If Hiyori uses any Special move while the opponent is active in Form Change, she receives a heavy **`-2.0`** penalty.
+    *   **Form Change Combat Boost:** While transformed, Hiyori receives a passive **`+0.05`** reward per step, and any damage she deals receives a **`1.2x`** reward multiplier (+20% bonus).
+5.  **Red Shoes System (Thematic Berserk Protocol):**
     *   Only active when the match timer is finite.
     *   If the time remaining drops below **20 seconds** AND Hiyori (P1) is trailing in HP (`p1_hp < p2_hp`), the forced-combat **Red Shoes System** triggers (a reference to the secret berserk protocol in Kabuto/Gatack's Zecters).
     *   While active:

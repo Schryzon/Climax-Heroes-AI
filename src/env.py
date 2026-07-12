@@ -136,6 +136,7 @@ class Climax_Heroes_Env(gym.Env):
         self.round_steps = 0
         self.zero_hp_streak = 0
         self.need_rematch = False
+        self.charge_persist_steps = 0
 
     def _rebuild_joysticks(self):
         # Gracefully release old joysticks
@@ -224,12 +225,46 @@ class Climax_Heroes_Env(gym.Env):
         self.zero_hp_streak = 0
         self.last_action = Climax_Action.IDLE
         self.prev_action = Climax_Action.IDLE
+        self.charge_persist_steps = 0
         
         return self._get_stacked_obs(), {}
 
     def step(self, action_idx):
         # Convert raw index to Climax_Action enum
         action = Climax_Action(action_idx)
+        
+        # Assisted Exploration / Action Injection & Redirection:
+        # If meter is above 75.0/80.0 and we are not in form change, redirect specials/charge or inject.
+        import random
+        if (self.reward_calculator.prev_p1_rider > 75.0 and 
+            not getattr(self.reward_calculator, 'p1_in_form', False)):
+            if action == Climax_Action.CHARGE_GAUGE:
+                action = Climax_Action.FORM_CHANGE
+                if self.debug:
+                    print("[Action Redirection] Redirected CHARGE_GAUGE to FORM_CHANGE due to high meter.")
+            elif (self.reward_calculator.prev_p1_rider >= 80.0 and 
+                  action in [Climax_Action.SPECIAL, Climax_Action.SPECIAL_DOWN, Climax_Action.SPECIAL_RIGHT, Climax_Action.SPECIAL_LEFT]):
+                action = Climax_Action.FORM_CHANGE
+                if self.debug:
+                    print("[Action Redirection] Redirected SPECIAL to FORM_CHANGE due to high meter.")
+            elif random.random() < 0.20:
+                if self.reward_calculator.prev_p1_rider >= 95.0:
+                    action = random.choices(
+                        [Climax_Action.FORM_CHANGE, Climax_Action.RIDER_FINALE],
+                        weights=[0.6, 0.4]
+                    )[0]
+                else:
+                    action = Climax_Action.FORM_CHANGE
+                if self.debug:
+                    print(f"[Action Injection] Forced {action.name} to assist exploration.")
+
+        # Action Persistence (Sticky Charging):
+        # Force a minimum duration of 60 steps (~2.0s) for charging to guarantee meter gains.
+        if self.charge_persist_steps > 0:
+            action = Climax_Action.CHARGE_GAUGE
+            self.charge_persist_steps -= 1
+        elif action == Climax_Action.CHARGE_GAUGE:
+            self.charge_persist_steps = 60
         
         # Check for manual joystick override takeover
         if self.enable_takeover:
@@ -280,6 +315,10 @@ class Climax_Heroes_Env(gym.Env):
         
         # 4. Extract rewards and check round status
         p1_hp, p2_hp = self.hud_parser.read_hps(bgr_full)
+        
+        # Break sticky charge lock immediately if damage is taken
+        if self.reward_calculator.prev_p1_hp - p1_hp > 0.0:
+            self.charge_persist_steps = 0
         
         # Detect round/match reset (both players restored to full HP from a damaged/dead state)
         # to ensure round_steps is kept accurate for Red Shoes System calculation

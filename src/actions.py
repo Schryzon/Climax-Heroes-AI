@@ -74,7 +74,9 @@ class Gamepad_Executor:
         elif action == Climax_Action.RIDER_FINALE:
             self.gamepad.right_trigger(value=255)
             self.gamepad.update()
-            time.sleep(0.15)
+            time.sleep(0.30)
+            self.gamepad.right_trigger(value=0)
+            self.gamepad.update()
         elif action == Climax_Action.EVADE_LEFT:
             self.gamepad.press_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_LEFT_SHOULDER)
         elif action == Climax_Action.EVADE_RIGHT:
@@ -84,7 +86,9 @@ class Gamepad_Executor:
         elif action == Climax_Action.FORM_CHANGE:
             self.gamepad.left_trigger(value=255)
             self.gamepad.update()
-            time.sleep(0.15)
+            time.sleep(0.30)
+            self.gamepad.left_trigger(value=0)
+            self.gamepad.update()
         elif action == Climax_Action.CANCEL_RIGHT:
             self._execute_cancel(vg.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_RIGHT)
         elif action == Climax_Action.CANCEL_LEFT:

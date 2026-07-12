@@ -19,8 +19,37 @@ class Reward_Calculator:
         self.special_hit_detected = False
         self.kick_active_steps = 0
         self.kick_hit_detected = False
+        self.p1_depleting_consecutive_steps = 0
+        self.p2_depleting_consecutive_steps = 0
         
     def calculate_reward(self, p1_hp, p2_hp, p1_guard, p2_guard, p1_rider, p2_rider, combo_count, p1_rounds, p2_rounds, is_infinite, last_action, prev_action, round_steps, opponent_finisher_connected=False):
+        # Detect Form Change depletion
+        # P1
+        p1_in_form = False
+        if p1_rider > 0.0:
+            p1_rider_diff = self.prev_p1_rider - p1_rider
+            if 0.1 <= p1_rider_diff <= 5.0:
+                self.p1_depleting_consecutive_steps += 1
+            else:
+                self.p1_depleting_consecutive_steps = max(0, self.p1_depleting_consecutive_steps - 2)
+        else:
+            self.p1_depleting_consecutive_steps = 0
+        if self.p1_depleting_consecutive_steps >= 10:
+            p1_in_form = True
+
+        # P2
+        p2_in_form = False
+        if p2_rider > 0.0:
+            p2_rider_diff = self.prev_p2_rider - p2_rider
+            if 0.1 <= p2_rider_diff <= 5.0:
+                self.p2_depleting_consecutive_steps += 1
+            else:
+                self.p2_depleting_consecutive_steps = max(0, self.p2_depleting_consecutive_steps - 2)
+        else:
+            self.p2_depleting_consecutive_steps = 0
+        if self.p2_depleting_consecutive_steps >= 10:
+            p2_in_form = True
+
         # 1. HP damage dealt (to P2) vs taken (by P1)
         damage_dealt = max(0.0, self.prev_p2_hp - p2_hp)
         damage_taken = max(0.0, self.prev_p1_hp - p1_hp)
@@ -44,7 +73,7 @@ class Reward_Calculator:
         
         # Guard Crush bonus
         if p2_guard == 0.0 and self.prev_p2_guard > 0.0:
-            reward += 5.0
+            reward += 1.0
         
         # AI's guard gauge reduction
         guard_taken = max(0.0, self.prev_p1_guard - p1_guard)
@@ -56,7 +85,7 @@ class Reward_Calculator:
                 
         # Guard Crush penalty
         if p1_guard == 0.0 and self.prev_p1_guard > 0.0:
-            reward -= 5.0
+            reward -= 1.0
                 
         # 3. Rider Gauge change & Potential
         rider_gained = max(0.0, p1_rider - self.prev_p1_rider)
@@ -68,9 +97,9 @@ class Reward_Calculator:
 
         # Heavy penalty for getting hit while charging (forces charging at a safe distance)
         if last_action == Climax_Action.CHARGE_GAUGE and damage_taken > 0:
-            reward -= 15.0
+            reward -= 3.0
             if self.debug:
-                print(f"[Reward] Hit while charging penalty! damage_taken={damage_taken:.1f}. -15.0 penalty.")
+                print(f"[Reward] Hit while charging penalty! damage_taken={damage_taken:.1f}. -3.0 penalty.")
 
         # Cancel/Quick Step logic:
         # - If done during an attack: It's a Rider Cancel (consumes 1 bar of meter, costs -0.5).
@@ -99,15 +128,35 @@ class Reward_Calculator:
             if self.special_active_steps == 0:
                 self.special_active_steps = 30  # 1.0 second window at 30fps
                 self.special_hit_detected = False
+            # Discourage using specials when meter is full (should prefer Form Change)
+            if self.prev_p1_rider >= 95.0:
+                reward -= 0.6
+                if self.debug:
+                    print("[Reward] Used Special with full meter instead of Form Changing! -0.6 penalty.")
+            # Cost for using specials outside of Form Change to break the habit
+            if not p1_in_form:
+                reward -= 0.2
+                if self.debug:
+                    print("[Reward] Used Special in normal form! -0.2 habit-breaking cost.")
+            # Extra penalty for spamming specials consecutively (breaks the Auto-Vajin summon loop)
+            if prev_action in [Climax_Action.SPECIAL, Climax_Action.SPECIAL_DOWN, Climax_Action.SPECIAL_RIGHT, Climax_Action.SPECIAL_LEFT]:
+                reward -= 0.5
+                if self.debug:
+                    print("[Reward] Spammed Special consecutively! -0.5 spam penalty.")
+            # Heavy penalty if used while opponent is in Clock Up / Form Change
+            if p2_in_form:
+                reward -= 2.0
+                if self.debug:
+                    print("[Reward] Used Special during Opponent's Clock Up! -2.0 penalty.")
                 
         if self.special_active_steps > 0:
             self.special_active_steps -= 1
             if damage_dealt > 0:
                 self.special_hit_detected = True
             if self.special_active_steps == 0 and not self.special_hit_detected:
-                reward -= 2.5
+                reward -= 0.5
                 if self.debug:
-                    print("[Reward] Special move failed to hit (whiff/block)! -2.5 penalty.")
+                    print("[Reward] Special move failed to hit (whiff/block)! -0.5 penalty.")
 
         # Track Rider Kick (D-pad Up + Circle / Xbox B) hit success window
         if last_action == Climax_Action.RIDER_KICK:
@@ -120,26 +169,41 @@ class Reward_Calculator:
             if damage_dealt > 0:
                 self.kick_hit_detected = True
             if self.kick_active_steps == 0 and not self.kick_hit_detected:
-                reward -= 3.0
+                reward -= 0.6
                 if self.debug:
-                    print("[Reward] Rider Kick failed to hit (whiff/block)! -3.0 penalty.")
+                    print("[Reward] Rider Kick failed to hit (whiff/block)! -0.6 penalty.")
 
         # Punish getting hit by opponent's Rider Finale (finisher)
         if opponent_finisher_connected:
-            reward -= 30.0
+            reward -= 6.0
             if self.debug:
-                print("[Reward] Smacked by Opponent's Rider Finale! -30.0 penalty.")
+                print("[Reward] Smacked by Opponent's Rider Finale! -6.0 penalty.")
 
         # Form Change (L2) and Finisher (R2) attempt rewards when meter is full
         if self.prev_p1_rider >= 95.0:
             if last_action == Climax_Action.FORM_CHANGE:
-                reward += 5.0
-                if self.debug:
-                    print("[Reward] Form Change triggered with full meter! +5.0 bonus.")
+                fc_reward = 1.0
+                if p2_in_form:
+                    fc_reward += 2.0
+                    if self.debug:
+                        print("[Reward] Counter Form Change triggered! Enemy is in Form Change. +3.0 total bonus.")
+                else:
+                    if self.debug:
+                        print("[Reward] Form Change triggered with full meter! +1.0 bonus.")
+                reward += fc_reward
             elif last_action == Climax_Action.RIDER_FINALE:
-                reward += 5.0
+                reward += 1.0
                 if self.debug:
-                    print("[Reward] Rider Finale triggered with full meter! +5.0 bonus.")
+                    print("[Reward] Rider Finale triggered with full meter! +1.0 bonus.")
+
+        # Form Change Combat Boost
+        if p1_in_form:
+            reward += 0.05
+            # Scale up damage dealt rewards slightly (e.g. 1.2x) during Form Change
+            if damage_dealt_reward > 0:
+                reward += damage_dealt_reward * 0.2
+                if self.debug:
+                    print(f"[Reward] Damage dealt in Form Change! +{damage_dealt_reward * 0.2:.2f} bonus (1.2x multiplier).")
         
         # 4. Combo bonus
         if combo_count > 0:
@@ -147,9 +211,9 @@ class Reward_Calculator:
             
         # Milestone combo bonus for hitting 10+ combo sequence (only rewarded once per sequence)
         if combo_count >= 10 and self.prev_combo_count < 10:
-            reward += 5.0
+            reward += 1.0
             if self.debug:
-                print(f"[Reward] Milestone Combo reached! {combo_count} hits! +5.0 bonus.")
+                print(f"[Reward] Milestone Combo reached! {combo_count} hits! +1.0 bonus.")
             
         # 5. Red Shoes System (forced berserk combat fail-safe when trailing in HP near round end)
         # Inspired by the Kabuto Zecter's secret berserk program. As Hiyori is half-Worm, 
