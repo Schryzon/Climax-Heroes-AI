@@ -21,34 +21,43 @@ class Reward_Calculator:
         self.kick_hit_detected = False
         self.p1_depleting_consecutive_steps = 0
         self.p2_depleting_consecutive_steps = 0
+        self.p1_in_form = False
+        self.p2_in_form = False
         
     def calculate_reward(self, p1_hp, p2_hp, p1_guard, p2_guard, p1_rider, p2_rider, combo_count, p1_rounds, p2_rounds, is_infinite, last_action, prev_action, round_steps, opponent_finisher_connected=False):
         # Detect Form Change depletion
         # P1
-        p1_in_form = False
         if p1_rider > 0.0:
             p1_rider_diff = self.prev_p1_rider - p1_rider
-            if 0.1 <= p1_rider_diff <= 5.0:
+            if 0.05 <= p1_rider_diff <= 8.0:
                 self.p1_depleting_consecutive_steps += 1
-            else:
-                self.p1_depleting_consecutive_steps = max(0, self.p1_depleting_consecutive_steps - 2)
+            elif p1_rider_diff < 0.0 or p1_rider_diff > 8.0:
+                if not self.p1_in_form:
+                    self.p1_depleting_consecutive_steps = max(0, self.p1_depleting_consecutive_steps - 1)
         else:
             self.p1_depleting_consecutive_steps = 0
-        if self.p1_depleting_consecutive_steps >= 10:
-            p1_in_form = True
+            self.p1_in_form = False
+
+        if self.p1_depleting_consecutive_steps >= 5:
+            self.p1_in_form = True
 
         # P2
-        p2_in_form = False
         if p2_rider > 0.0:
             p2_rider_diff = self.prev_p2_rider - p2_rider
-            if 0.1 <= p2_rider_diff <= 5.0:
+            if 0.05 <= p2_rider_diff <= 8.0:
                 self.p2_depleting_consecutive_steps += 1
-            else:
-                self.p2_depleting_consecutive_steps = max(0, self.p2_depleting_consecutive_steps - 2)
+            elif p2_rider_diff < 0.0 or p2_rider_diff > 8.0:
+                if not self.p2_in_form:
+                    self.p2_depleting_consecutive_steps = max(0, self.p2_depleting_consecutive_steps - 1)
         else:
             self.p2_depleting_consecutive_steps = 0
-        if self.p2_depleting_consecutive_steps >= 10:
-            p2_in_form = True
+            self.p2_in_form = False
+
+        if self.p2_depleting_consecutive_steps >= 5:
+            self.p2_in_form = True
+
+        p1_in_form = self.p1_in_form
+        p2_in_form = self.p2_in_form
 
         # 1. HP damage dealt (to P2) vs taken (by P1)
         damage_dealt = max(0.0, self.prev_p2_hp - p2_hp)
@@ -100,6 +109,12 @@ class Reward_Calculator:
             reward -= 3.0
             if self.debug:
                 print(f"[Reward] Hit while charging penalty! damage_taken={damage_taken:.1f}. -3.0 penalty.")
+
+        # Punish charging while form change is active
+        if last_action == Climax_Action.CHARGE_GAUGE and p1_in_form:
+            reward -= 2.0
+            if self.debug:
+                print("[Reward] Charged while form change is active! -2.0 penalty.")
 
         # Cancel/Quick Step logic:
         # - If done during an attack: It's a Rider Cancel (consumes 1 bar of meter, costs -0.5).

@@ -260,6 +260,12 @@ class Climax_Heroes_Env(gym.Env):
 
         # Action Persistence (Sticky Charging):
         # Force a minimum duration of 60 steps (~2.0s) for charging to guarantee meter gains.
+        # But if form change is active, disable charging completely and redirect to IDLE as a fallback.
+        if getattr(self.reward_calculator, 'p1_in_form', False):
+            self.charge_persist_steps = 0
+            if action == Climax_Action.CHARGE_GAUGE:
+                action = Climax_Action.IDLE
+
         if self.charge_persist_steps > 0:
             action = Climax_Action.CHARGE_GAUGE
             self.charge_persist_steps -= 1

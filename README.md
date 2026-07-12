@@ -234,6 +234,7 @@ We use a dense, scaled reward framework in [rewards.py](src/rewards.py) to avoid
 3.  **Special Actions & Dynamic Penalties:**
     *   **Safely Charging:** `+0.30` per unit of meter generated.
     *   **Hit While Charging:** `-3.0` penalty if Hiyori is hit while charging (forces her to back away and create distance before building meter).
+    *   **Charging during Form Change Prohibited:** Charging is completely disabled during Form Change. Doing so carries a **`-2.0` penalty** in training, and in evaluation the policy dynamically resamples to select alternative active moves (with a fallback redirection to `IDLE`).
     *   **Special Move Whiff Tracking:** When Hiyori uses a Special Attack, a **30-step (1.0 second)** evaluation window starts. If it whiffs or gets blocked, she receives a **`-0.5` penalty**.
     *   **Rider Kick Whiff Tracking:** When Hiyori executes a Rider Kick, a **45-step (1.5 second)** evaluation window starts. If it whiffs, she receives a **`-0.6` penalty**.
     *   **Opponent Finisher Hit:** `-6.0` penalty if Hiyori is hit by the opponent's Rider Finale (punishes her for failing to defend against ultimates).
@@ -244,7 +245,7 @@ We use a dense, scaled reward framework in [rewards.py](src/rewards.py) to avoid
         *   **Rider Cancel (In Combat):** If executed during an attack string, it is treated as a Rider Cancel (spends meter) and costs **`-0.5`** to prevent meter wasting.
         *   **Quick Step (In Neutral):** If executed in neutral, it is treated as a Quick Step (free movement) and costs **`-0.08`** (same as a normal dodge) to prevent infinite backstep spamming.
 4.  **Form Change / Speed State Mechanics:**
-    *   **Form Change State Tracking:** A consecutive frame depletion checker monitors both players' Rider Gauges. If a player's gauge decreases steadily by `[0.1, 5.0]` units per step for **10 consecutive frames** without hitting zero, they are flagged as being in "Form Change".
+    *   **Form Change State Tracking:** A consecutive frame depletion checker monitors both players' Rider Gauges. If a player's gauge decreases steadily by `[0.05, 8.0]` units per step for **5 consecutive frames** (ignoring flat duplicate frames caused by emulator/capture lag) without hitting zero, they are flagged as being in "Form Change". This state latches until the gauge depletes to `0.0`.
     *   **Counter Form Change Bonus:** If Hiyori activates a Form Change while the opponent is currently active in Form Change, she receives an additional `+2.0` (total **`+3.0`**) "Counter Form Change" bonus to encourage matching the opponent's speed.
     *   **Opponent Form Change Special Penalty:** If Hiyori uses any Special move while the opponent is active in Form Change, she receives a heavy **`-2.0`** penalty.
     *   **Form Change Combat Boost:** While transformed, Hiyori receives a passive **`+0.05`** reward per step, and any damage she deals receives a **`1.2x`** reward multiplier (+20% bonus).
