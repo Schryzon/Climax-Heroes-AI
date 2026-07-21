@@ -68,7 +68,7 @@ Hiyori is backed by a highly optimized, custom-engineered framework. Key achieve
 *   **Bi-directional Finisher Detection:** The environment parses screen layout transitions. It detects both when Hiyori connects a Rider Finale and when the opponent hits Hiyori with a Rider Finale (indicated by the opponent's full meter preceding a sudden HUD collapse). In both cases, the training loop is paused dynamically for the duration of the cinematic cutscene.
 *   **Action Redirection & Assisted Injections:** To prevent Hiyori from discharging her meter before transforming, we intercept and redirect actions:
     *   **Charge Redirection:** If the meter is $>75.0\%$, attempts to use `CHARGE_GAUGE` are redirected to `FORM_CHANGE`.
-    *   **Special Redirection:** If the meter is $\ge 80.0\%$, attempts to use Specials are redirected to `FORM_CHANGE`.
+    *   **Support Redirection:** If the meter is $\ge 80.0\%$, attempts to use Support moves are redirected to `FORM_CHANGE`.
     *   **Dual Injection Pool:** When the meter is strictly full ($\ge 95.0\%$), a 20% injection probability chooses randomly between `FORM_CHANGE` (60% weight) and `RIDER_FINALE` (40% weight) to assist exploration.
     *   *Note: Redirection and injection console logs are debug-mode exclusive.*
 *   **Action Persistence (Sticky Charging):** Frame-by-frame PPO models struggle to hold down buttons. If Hiyori initiates a `CHARGE_GAUGE` action, the environment locks it for a minimum of **60 steps (~2.0 seconds)** to guarantee substantial meter gain. This lock is immediately broken if she takes damage, allowing immediate recovery and defense.
@@ -157,7 +157,7 @@ This opens an interactive menu supporting:
 
 The environment represents the game state using **4 stacked $84 \times 84$ grayscale frames** (capturing the last 133ms of movement).
 
-The policy outputs an integer corresponding to one of **34 discrete macro actions** in [Climax_Action](src/actions.py#L5):
+The policy outputs an integer corresponding to one of **31 discrete macro actions** in [Climax_Action](src/actions.py#L5):
 
 | Index | Enum Action | Physical Mapping |
 | :--- | :--- | :--- |
@@ -167,8 +167,8 @@ The policy outputs an integer corresponding to one of **34 discrete macro action
 | `3` | `JUMP` | Left Stick Up |
 | `4` | `LIGHT` | Xbox `X` (Weak Combo) |
 | `5` | `HEAVY` | Xbox `Y` (Strong Combo) |
-| `6` | `SPECIAL` | Xbox `A` (Special Move / 2 bars) |
-| `7` | `NORMAL_FINISHER` | Xbox `B` (Signature Strike) |
+| `6` | `SUPPORT` | Xbox `A` (Support Move / 2 bars) |
+| `7` | `SPECIAL` | Xbox `B` (Special Attack) |
 | `8` | `RIDER_FINALE` | Xbox `RT` (Ult / 5 bars) |
 | `9` | `EVADE_LEFT` | Xbox `LB` (Evade Fwd) |
 | `10` | `EVADE_RIGHT` | Xbox `RB` (Evade Back) |
@@ -185,16 +185,13 @@ The policy outputs an integer corresponding to one of **34 discrete macro action
 | `21` | `RIDER_KICK` | D-pad Up + Xbox `B` (Simultaneous) |
 | `22` | `LIGHT_DOWN` | D-pad Down + Xbox `X` (Crouching Weak) |
 | `23` | `HEAVY_DOWN` | D-pad Down + Xbox `Y` (Crouching Heavy/Launcher) |
-| `24` | `SPECIAL_DOWN` | D-pad Down + Xbox `A` (Crouching Special) |
-| `25` | `FINISHER_DOWN` | D-pad Down + Xbox `B` (Crouching Finisher) |
-| `26` | `LIGHT_RIGHT` | D-pad Right + Xbox `X` |
-| `27` | `LIGHT_LEFT` | D-pad Left + Xbox `X` |
-| `28` | `HEAVY_RIGHT` | D-pad Right + Xbox `Y` (Forward Grapple/Throw) |
-| `29` | `HEAVY_LEFT` | D-pad Left + Xbox `Y` (Forward Grapple/Throw) |
-| `30` | `SPECIAL_RIGHT` | D-pad Right + Xbox `A` |
-| `31` | `SPECIAL_LEFT` | D-pad Left + Xbox `A` |
-| `32` | `FINISHER_RIGHT` | D-pad Right + Xbox `B` |
-| `33` | `FINISHER_LEFT` | D-pad Left + Xbox `B` |
+| `24` | `SPECIAL_DOWN` | D-pad Down + Xbox `B` (Crouching Special) |
+| `25` | `LIGHT_RIGHT` | D-pad Right + Xbox `X` |
+| `26` | `LIGHT_LEFT` | D-pad Left + Xbox `X` |
+| `27` | `HEAVY_RIGHT` | D-pad Right + Xbox `Y` (Forward Grapple/Throw) |
+| `28` | `HEAVY_LEFT` | D-pad Left + Xbox `Y` (Forward Grapple/Throw) |
+| `29` | `SPECIAL_RIGHT` | D-pad Right + Xbox `B` |
+| `30` | `SPECIAL_LEFT` | D-pad Left + Xbox `B` |
 
 ---
 
@@ -235,19 +232,19 @@ We use a dense, scaled reward framework in [rewards.py](src/rewards.py) to avoid
     *   **Safely Charging:** `+0.30` per unit of meter generated.
     *   **Hit While Charging:** `-3.0` penalty if Hiyori is hit while charging (forces her to back away and create distance before building meter).
     *   **Charging during Form Change Prohibited:** Charging is completely disabled during Form Change. Doing so carries a **`-2.0` penalty** in training, and in evaluation the policy dynamically resamples to select alternative active moves (with a fallback redirection to `IDLE`).
-    *   **Special Move Whiff Tracking:** When Hiyori uses a Special Attack, a **30-step (1.0 second)** evaluation window starts. If it whiffs or gets blocked, she receives a **`-0.5` penalty**.
+    *   **Support Move Whiff Tracking:** When Hiyori uses a Support Attack, a **30-step (1.0 second)** evaluation window starts. If it whiffs or gets blocked, she receives a **`-0.5` penalty**.
     *   **Rider Kick Whiff Tracking:** When Hiyori executes a Rider Kick, a **45-step (1.5 second)** evaluation window starts. If it whiffs, she receives a **`-0.6` penalty**.
     *   **Opponent Finisher Hit:** `-6.0` penalty if Hiyori is hit by the opponent's Rider Finale (punishes her for failing to defend against ultimates).
     *   **Form Change / Finisher Use:** `+1.0` bonus every time she uses `FORM_CHANGE` or `RIDER_FINALE` while the meter is full.
-    *   **Normal Form Special Move Cost:** A flat **`-0.2`** action cost when executing any Special move in normal form to break the habit of spamming specials.
-    *   **Consecutive Special Spam Penalty:** A flat **`-0.5`** penalty if she performs a Special move immediately following another Special, breaking summon spam loops (like Auto-Vajin).
+    *   **Normal Form Support Move Cost:** A flat **`-0.2`** action cost when executing any Support move in normal form to break the habit of spamming support moves.
+    *   **Consecutive Support Spam Penalty:** A flat **`-0.5`** penalty if she performs a Support move immediately following another Support, breaking summon spam loops (like Auto-Vajin).
     *   **Cancel / Quick Step Logic:** 
         *   **Rider Cancel (In Combat):** If executed during an attack string, it is treated as a Rider Cancel (spends meter) and costs **`-0.5`** to prevent meter wasting.
         *   **Quick Step (In Neutral):** If executed in neutral, it is treated as a Quick Step (free movement) and costs **`-0.08`** (same as a normal dodge) to prevent infinite backstep spamming.
 4.  **Form Change / Speed State Mechanics:**
     *   **Form Change State Tracking:** A consecutive frame depletion checker monitors both players' Rider Gauges. If a player's gauge decreases steadily by `[0.05, 8.0]` units per step for **5 consecutive frames** (ignoring flat duplicate frames caused by emulator/capture lag) without hitting zero, they are flagged as being in "Form Change". This state latches until the gauge depletes to `0.0`.
     *   **Counter Form Change Bonus:** If Hiyori activates a Form Change while the opponent is currently active in Form Change, she receives an additional `+2.0` (total **`+3.0`**) "Counter Form Change" bonus to encourage matching the opponent's speed.
-    *   **Opponent Form Change Special Penalty:** If Hiyori uses any Special move while the opponent is active in Form Change, she receives a heavy **`-2.0`** penalty.
+    *   **Opponent Form Change Support Penalty:** If Hiyori uses any Support move while the opponent is active in Form Change, she receives a heavy **`-2.0`** penalty.
     *   **Form Change Combat Boost:** While transformed, Hiyori receives a passive **`+0.05`** reward per step, and any damage she deals receives a **`1.2x`** reward multiplier (+20% bonus).
 5.  **Red Shoes System (Thematic Berserk Protocol):**
     *   Only active when the match timer is finite.
@@ -255,6 +252,10 @@ We use a dense, scaled reward framework in [rewards.py](src/rewards.py) to avoid
     *   While active:
         *   **Berserk Offense:** All damage dealt rewards are doubled (`damage_dealt_reward * 2.0`), transforming Hiyori into an unstoppable attacker to ensure survival.
         *   **Deficit Pressure:** Hiyori receives a step penalty based on her HP deficit (`(p2_hp - p1_hp) * 0.05`). This penalty is **doubled** if she is also trailing in round wins, forcing her to relentlessly chase and finish the target.
+6.  **Automated Session Logging:**
+    *   **Round Stats Logger**: If enabled (`enable_logging=True` in the environment constructor), the environment automatically writes round-level metrics to `checkpoints/hiyori_training_stats.csv` upon round reset transitions.
+    *   **Monitored Variables**: Tracks win/loss outcomes, steps per round, final HP states, damage dealt/taken, action counts (`FORM_CHANGE`, `RIDER_FINALE`, `RIDER_KICK`, `SUPPORT`), whiff/hit counts for attacks, and active duration of the Red Shoes System.
+    *   **Storage Efficiency**: Outputs raw text-based CSV rows for zero-bloat storage footprint (<1 MB for 10,000 rounds) on both training laptops and mobile viewports.
 
 ---
 

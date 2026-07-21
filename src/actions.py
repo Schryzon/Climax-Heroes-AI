@@ -9,8 +9,8 @@ class Climax_Action(IntEnum):
     JUMP = 3
     LIGHT = 4
     HEAVY = 5
-    SPECIAL = 6
-    NORMAL_FINISHER = 7
+    SUPPORT = 6
+    SPECIAL = 7
     RIDER_FINALE = 8
     EVADE_LEFT = 9
     EVADE_RIGHT = 10
@@ -28,15 +28,12 @@ class Climax_Action(IntEnum):
     LIGHT_DOWN = 22
     HEAVY_DOWN = 23
     SPECIAL_DOWN = 24
-    FINISHER_DOWN = 25
-    LIGHT_RIGHT = 26
-    LIGHT_LEFT = 27
-    HEAVY_RIGHT = 28
-    HEAVY_LEFT = 29
-    SPECIAL_RIGHT = 30
-    SPECIAL_LEFT = 31
-    FINISHER_RIGHT = 32
-    FINISHER_LEFT = 33
+    LIGHT_RIGHT = 25
+    LIGHT_LEFT = 26
+    HEAVY_RIGHT = 27
+    HEAVY_LEFT = 28
+    SPECIAL_RIGHT = 29
+    SPECIAL_LEFT = 30
 
 class Gamepad_Executor:
     def __init__(self, gamepad=None):
@@ -69,9 +66,9 @@ class Gamepad_Executor:
             self.gamepad.press_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_X)
         elif action == Climax_Action.HEAVY:
             self.gamepad.press_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_Y)
-        elif action == Climax_Action.SPECIAL:
+        elif action == Climax_Action.SUPPORT:
             self.gamepad.press_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_A)
-        elif action == Climax_Action.NORMAL_FINISHER:
+        elif action == Climax_Action.SPECIAL:
             self.gamepad.press_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_B)
         elif action == Climax_Action.RIDER_FINALE:
             self.gamepad.right_trigger(value=255)
@@ -118,9 +115,6 @@ class Gamepad_Executor:
             self.gamepad.press_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_Y)
         elif action == Climax_Action.SPECIAL_DOWN:
             self.gamepad.left_joystick(x_value=0, y_value=-32768)
-            self.gamepad.press_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_A)
-        elif action == Climax_Action.FINISHER_DOWN:
-            self.gamepad.left_joystick(x_value=0, y_value=-32768)
             self.gamepad.press_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_B)
         elif action == Climax_Action.LIGHT_RIGHT:
             self.gamepad.left_joystick(x_value=32767, y_value=0)
@@ -135,15 +129,9 @@ class Gamepad_Executor:
             self.gamepad.left_joystick(x_value=-32768, y_value=0)
             self.gamepad.press_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_Y)
         elif action == Climax_Action.SPECIAL_RIGHT:
-            self.gamepad.left_joystick(x_value=32767, y_value=0)
-            self.gamepad.press_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_A)
-        elif action == Climax_Action.SPECIAL_LEFT:
-            self.gamepad.left_joystick(x_value=-32768, y_value=0)
-            self.gamepad.press_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_A)
-        elif action == Climax_Action.FINISHER_RIGHT:
             self.gamepad.press_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_RIGHT)
             self.gamepad.press_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_B)
-        elif action == Climax_Action.FINISHER_LEFT:
+        elif action == Climax_Action.SPECIAL_LEFT:
             self.gamepad.press_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_LEFT)
             self.gamepad.press_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_B)
             

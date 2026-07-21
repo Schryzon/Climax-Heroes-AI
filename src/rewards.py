@@ -15,14 +15,22 @@ class Reward_Calculator:
         self.prev_combo_count = 0
         self.p1_form_changed = False
         self.p1_finisher_attempted = False
-        self.special_active_steps = 0
-        self.special_hit_detected = False
+        self.support_active_steps = 0
+        self.support_hit_detected = False
         self.kick_active_steps = 0
         self.kick_hit_detected = False
         self.p1_depleting_consecutive_steps = 0
         self.p2_depleting_consecutive_steps = 0
         self.p1_in_form = False
         self.p2_in_form = False
+        
+        # Round statistics counters
+        self.round_support_hits = 0
+        self.round_support_whiffs = 0
+        self.round_kick_hits = 0
+        self.round_kick_whiffs = 0
+        self.round_red_shoes_steps = 0
+        self.round_attack_cancels = 0
         
     def calculate_reward(self, p1_hp, p2_hp, p1_guard, p2_guard, p1_rider, p2_rider, combo_count, p1_rounds, p2_rounds, is_infinite, last_action, prev_action, round_steps, opponent_finisher_connected=False):
         # Detect Form Change depletion
@@ -121,16 +129,16 @@ class Reward_Calculator:
         # - If done in neutral: It's a Quick Step (free movement, minor cost -0.08 to prevent spam, same as dodge).
         if last_action in [Climax_Action.CANCEL_RIGHT, Climax_Action.CANCEL_LEFT]:
             if prev_action in [
-                Climax_Action.LIGHT, Climax_Action.HEAVY, Climax_Action.SPECIAL, 
-                Climax_Action.NORMAL_FINISHER, Climax_Action.RIDER_FINALE,
+                Climax_Action.LIGHT, Climax_Action.HEAVY, Climax_Action.SUPPORT, 
+                Climax_Action.SPECIAL, Climax_Action.RIDER_FINALE,
                 Climax_Action.RUNNING_LIGHT_RIGHT, Climax_Action.RUNNING_LIGHT_LEFT,
                 Climax_Action.RUNNING_HEAVY_RIGHT, Climax_Action.RUNNING_HEAVY_LEFT,
-                Climax_Action.LIGHT_DOWN, Climax_Action.HEAVY_DOWN, Climax_Action.SPECIAL_DOWN, Climax_Action.FINISHER_DOWN,
+                Climax_Action.LIGHT_DOWN, Climax_Action.HEAVY_DOWN, Climax_Action.SPECIAL_DOWN,
                 Climax_Action.LIGHT_RIGHT, Climax_Action.LIGHT_LEFT,
                 Climax_Action.HEAVY_RIGHT, Climax_Action.HEAVY_LEFT,
-                Climax_Action.SPECIAL_RIGHT, Climax_Action.SPECIAL_LEFT,
-                Climax_Action.FINISHER_RIGHT, Climax_Action.FINISHER_LEFT
+                Climax_Action.SPECIAL_RIGHT, Climax_Action.SPECIAL_LEFT
             ]:
+                self.round_attack_cancels += 1
                 reward -= 0.5  # Attack Cancel (Rider Cancel) cost
                 if self.debug:
                     print("[Reward] Attack cancel executed. -0.5 cost.")
@@ -139,40 +147,43 @@ class Reward_Calculator:
                 if self.debug:
                     print("[Reward] Quick Step in neutral. -0.08 cost.")
 
-        # Track special move (Cross / Xbox A) hit success window (punishes mindless spamming/whiffs)
-        if last_action in [Climax_Action.SPECIAL, Climax_Action.SPECIAL_DOWN, Climax_Action.SPECIAL_RIGHT, Climax_Action.SPECIAL_LEFT]:
-            if self.special_active_steps == 0:
-                self.special_active_steps = 30  # 1.0 second window at 30fps
-                self.special_hit_detected = False
-            # Discourage using specials when meter is full (should prefer Form Change)
+        # Track support move (Cross / Xbox A) hit success window (punishes mindless spamming/whiffs)
+        if last_action == Climax_Action.SUPPORT:
+            if self.support_active_steps == 0:
+                self.support_active_steps = 30  # 1.0 second window at 30fps
+                self.support_hit_detected = False
+            # Discourage using support when meter is full (should prefer Form Change)
             if self.prev_p1_rider >= 95.0:
                 reward -= 0.6
                 if self.debug:
-                    print("[Reward] Used Special with full meter instead of Form Changing! -0.6 penalty.")
-            # Cost for using specials outside of Form Change to break the habit
+                    print("[Reward] Used Support with full meter instead of Form Changing! -0.6 penalty.")
+            # Cost for using support outside of Form Change to break the habit
             if not p1_in_form:
                 reward -= 0.2
                 if self.debug:
-                    print("[Reward] Used Special in normal form! -0.2 habit-breaking cost.")
-            # Extra penalty for spamming specials consecutively (breaks the Auto-Vajin summon loop)
-            if prev_action in [Climax_Action.SPECIAL, Climax_Action.SPECIAL_DOWN, Climax_Action.SPECIAL_RIGHT, Climax_Action.SPECIAL_LEFT]:
+                    print("[Reward] Used Support in normal form! -0.2 habit-breaking cost.")
+            # Extra penalty for spamming support consecutively (breaks the Auto-Vajin summon loop)
+            if prev_action == Climax_Action.SUPPORT:
                 reward -= 0.5
                 if self.debug:
-                    print("[Reward] Spammed Special consecutively! -0.5 spam penalty.")
+                    print("[Reward] Spammed Support consecutively! -0.5 spam penalty.")
             # Heavy penalty if used while opponent is in Clock Up / Form Change
             if p2_in_form:
                 reward -= 2.0
                 if self.debug:
-                    print("[Reward] Used Special during Opponent's Clock Up! -2.0 penalty.")
+                    print("[Reward] Used Support during Opponent's Clock Up! -2.0 penalty.")
                 
-        if self.special_active_steps > 0:
-            self.special_active_steps -= 1
+        if self.support_active_steps > 0:
+            self.support_active_steps -= 1
             if damage_dealt > 0:
-                self.special_hit_detected = True
-            if self.special_active_steps == 0 and not self.special_hit_detected:
+                if not self.support_hit_detected:
+                    self.round_support_hits += 1
+                self.support_hit_detected = True
+            if self.support_active_steps == 0 and not self.support_hit_detected:
+                self.round_support_whiffs += 1
                 reward -= 0.5
                 if self.debug:
-                    print("[Reward] Special move failed to hit (whiff/block)! -0.5 penalty.")
+                    print("[Reward] Support move failed to hit (whiff/block)! -0.5 penalty.")
 
         # Track Rider Kick (D-pad Up + Circle / Xbox B) hit success window
         if last_action == Climax_Action.RIDER_KICK:
@@ -183,8 +194,11 @@ class Reward_Calculator:
         if self.kick_active_steps > 0:
             self.kick_active_steps -= 1
             if damage_dealt > 0:
+                if not self.kick_hit_detected:
+                    self.round_kick_hits += 1
                 self.kick_hit_detected = True
             if self.kick_active_steps == 0 and not self.kick_hit_detected:
+                self.round_kick_whiffs += 1
                 reward -= 0.6
                 if self.debug:
                     print("[Reward] Rider Kick failed to hit (whiff/block)! -0.6 penalty.")
@@ -237,6 +251,7 @@ class Reward_Calculator:
         if not is_infinite:
             time_left = max(0.0, 99.0 - (round_steps / 30.0))
             if time_left < 20.0 and p1_hp < p2_hp:
+                self.round_red_shoes_steps += 1
                 # Double all damage dealt rewards (berserk mode)
                 if damage_dealt > 0:
                     reward += damage_dealt_reward * 1.0

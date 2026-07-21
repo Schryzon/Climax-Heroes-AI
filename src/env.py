@@ -33,13 +33,14 @@ from src.rewards import Reward_Calculator
 class Climax_Heroes_Env(gym.Env):
     metadata = {"render_modes": ["human"]}
 
-    def __init__(self, window_region=None, debug=False, enable_takeover=True):
+    def __init__(self, window_region=None, debug=False, enable_takeover=True, enable_logging=False):
         super().__init__()
         self.debug = debug
         self.enable_takeover = enable_takeover
+        self.enable_logging = enable_logging
         
-        # Action space: 34 discrete actions mapped via Climax_Action enum
-        self.action_space = gym.spaces.Discrete(34)
+        # Action space: 31 discrete actions mapped via Climax_Action enum
+        self.action_space = gym.spaces.Discrete(31)
         
         # Observation space: 4 stacked 84x84 grayscale frames
         self.observation_space = gym.spaces.Box(
@@ -68,6 +69,38 @@ class Climax_Heroes_Env(gym.Env):
             print("Warning: vgamepad not installed or failed to load. Input injection will be simulated.")
             
         self.gamepad_executor = Gamepad_Executor(self.gamepad)
+
+        # Action frequency logging
+        self.action_counts = {action: 0 for action in Climax_Action}
+        self.total_action_steps = 0
+
+        # Round-level training statistics tracking
+        self.round_index = 0
+        self.round_form_changes = 0
+        self.round_rider_finales = 0
+        self.round_rider_kicks = 0
+        self.round_support_uses = 0
+        self.round_total_reward = 0.0
+        self.round_damage_dealt = 0.0
+        self.round_damage_taken = 0.0
+        
+        # Initialize CSV logging file
+        if self.enable_logging:
+            import os
+            import csv
+            self.csv_path = "checkpoints/hiyori_training_stats.csv"
+            os.makedirs(os.path.dirname(self.csv_path), exist_ok=True)
+            if not os.path.exists(self.csv_path):
+                with open(self.csv_path, mode='w', newline='') as f:
+                    writer = csv.writer(f)
+                    writer.writerow([
+                        "round_index", "outcome", "duration_steps", "p1_final_hp", "p2_final_hp",
+                        "total_damage_dealt", "total_damage_taken", "total_reward",
+                        "form_changes", "rider_finales", "rider_kicks",
+                        "rider_kick_hits", "rider_kick_whiffs",
+                        "support_uses", "support_hits", "support_whiffs",
+                        "red_shoes_steps", "attack_cancels", "timestamp"
+                    ])
 
         # Initialize pygame for manual physical controller override
         pygame.init()
@@ -243,10 +276,10 @@ class Climax_Heroes_Env(gym.Env):
                 if self.debug:
                     print("[Action Redirection] Redirected CHARGE_GAUGE to FORM_CHANGE due to high meter.")
             elif (self.reward_calculator.prev_p1_rider >= 80.0 and 
-                  action in [Climax_Action.SPECIAL, Climax_Action.SPECIAL_DOWN, Climax_Action.SPECIAL_RIGHT, Climax_Action.SPECIAL_LEFT]):
+                  action == Climax_Action.SUPPORT):
                 action = Climax_Action.FORM_CHANGE
                 if self.debug:
-                    print("[Action Redirection] Redirected SPECIAL to FORM_CHANGE due to high meter.")
+                    print("[Action Redirection] Redirected SUPPORT to FORM_CHANGE due to high meter.")
             elif random.random() < 0.20:
                 if self.reward_calculator.prev_p1_rider >= 95.0:
                     action = random.choices(
@@ -301,6 +334,19 @@ class Climax_Heroes_Env(gym.Env):
         self.last_action = action
         self.round_steps += 1
         
+        # Increment action frequency counters
+        self.action_counts[action] += 1
+        self.total_action_steps += 1
+        
+        if action == Climax_Action.FORM_CHANGE:
+            self.round_form_changes += 1
+        elif action == Climax_Action.RIDER_FINALE:
+            self.round_rider_finales += 1
+        elif action == Climax_Action.RIDER_KICK:
+            self.round_rider_kicks += 1
+        elif action == Climax_Action.SUPPORT:
+            self.round_support_uses += 1
+        
         # 1. Execute action through virtual controller
         self.gamepad_executor.execute_action(action, self.prev_action)
         
@@ -322,6 +368,10 @@ class Climax_Heroes_Env(gym.Env):
         # 4. Extract rewards and check round status
         p1_hp, p2_hp = self.hud_parser.read_hps(bgr_full)
         
+        # Accumulate round damage
+        self.round_damage_dealt += max(0.0, self.reward_calculator.prev_p2_hp - p2_hp)
+        self.round_damage_taken += max(0.0, self.reward_calculator.prev_p1_hp - p1_hp)
+        
         # Break sticky charge lock immediately if damage is taken
         if self.reward_calculator.prev_p1_hp - p1_hp > 0.0:
             self.charge_persist_steps = 0
@@ -330,6 +380,8 @@ class Climax_Heroes_Env(gym.Env):
         # to ensure round_steps is kept accurate for Red Shoes System calculation
         if (p1_hp >= 298.0 and p2_hp >= 298.0 and 
             (self.reward_calculator.prev_p1_hp < 290.0 or self.reward_calculator.prev_p2_hp < 290.0)):
+            self._log_round_stats()
+            self._reset_round_stats()
             if self.debug:
                 print(f"[Env] New round/match detected (HP restored to {p1_hp:.1f}/{p2_hp:.1f}). Resetting round steps.")
             self.round_steps = 0
@@ -401,6 +453,8 @@ class Climax_Heroes_Env(gym.Env):
             opponent_finisher_connected=opponent_finisher_connected
         )
         
+        self.round_total_reward += reward
+        
         # AI runs infinitely in a single continuous episode
         terminated = False
         truncated = False
@@ -408,6 +462,9 @@ class Climax_Heroes_Env(gym.Env):
         # Periodic CPU garbage collection to ensure no memory bloat/slowdown over long training runs (approx. every 30 seconds of play)
         if self.round_steps % 1000 == 0:
             gc.collect()
+        # Periodic Action Distribution Logging (every 10,000 steps)
+        if self.total_action_steps % 10000 == 0:
+            self.print_action_distribution()
             
         return stacked_obs, reward, terminated, truncated, {}
 
@@ -423,7 +480,89 @@ class Climax_Heroes_Env(gym.Env):
                 if event.type in [pygame.JOYBUTTONDOWN, pygame.JOYHATMOTION]:
                     self.last_user_input_time = time.time()
 
+    def _log_round_stats(self):
+        if not self.enable_logging:
+            return
+        import csv
+        from datetime import datetime
+        
+        self.round_index += 1
+        
+        # Determine the winner based on final HP values of the round
+        p1_final = self.reward_calculator.prev_p1_hp
+        p2_final = self.reward_calculator.prev_p2_hp
+        
+        if p1_final > p2_final:
+            outcome = "WIN"
+        elif p2_final > p1_final:
+            outcome = "LOSS"
+        else:
+            outcome = "DRAW"
+            
+        timestamp_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        row = [
+            self.round_index,
+            outcome,
+            self.round_steps,
+            p1_final,
+            p2_final,
+            self.round_damage_dealt,
+            self.round_damage_taken,
+            self.round_total_reward,
+            self.round_form_changes,
+            self.round_rider_finales,
+            self.round_rider_kicks,
+            self.reward_calculator.round_kick_hits,
+            self.reward_calculator.round_kick_whiffs,
+            self.round_support_uses,
+            self.reward_calculator.round_support_hits,
+            self.reward_calculator.round_support_whiffs,
+            self.reward_calculator.round_red_shoes_steps,
+            self.reward_calculator.round_attack_cancels,
+            timestamp_str
+        ]
+        
+        try:
+            with open(self.csv_path, mode='a', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow(row)
+            print(f"\n[Stats Logger] Round {self.round_index} logged: {outcome} | Steps: {self.round_steps} | DMG Dealt: {self.round_damage_dealt:.1f} | DMG Taken: {self.round_damage_taken:.1f} | Reward: {self.round_total_reward:.2f}")
+        except Exception as e:
+            print(f"Warning: Failed to log round stats to CSV: {e}")
+
+    def _reset_round_stats(self):
+        self.round_form_changes = 0
+        self.round_rider_finales = 0
+        self.round_rider_kicks = 0
+        self.round_support_uses = 0
+        self.round_total_reward = 0.0
+        self.round_damage_dealt = 0.0
+        self.round_damage_taken = 0.0
+        # Reset counters in Reward_Calculator as well
+        self.reward_calculator.reset()
+
+    def print_action_distribution(self):
+        if self.total_action_steps == 0:
+            return
+        print("\n" + "="*50)
+        print("          ACTION DISTRIBUTION PERCENTAGES")
+        print("="*50)
+        print(f"Total Steps: {self.total_action_steps}")
+        print("-"*50)
+        # Sort actions by percentage descending
+        sorted_actions = sorted(
+            self.action_counts.items(),
+            key=lambda item: item[1],
+            reverse=True
+        )
+        for act, count in sorted_actions:
+            pct = (count / self.total_action_steps) * 100
+            print(f"  {act.name:<25} : {pct:>6.2f}% ({count} steps)")
+        print("="*50 + "\n")
+
     def close(self):
+        self.print_action_distribution()
         self.sct.close()
         # Keep the virtual gamepad connected during the Python process lifecycle
         if self.gamepad is not None:
